@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <array>
 
 namespace storagecleaner::ui {
@@ -35,7 +36,12 @@ void DrawSettingsPanel(UiState& state) {
     if (ImGui::Checkbox("Iniciar com o Windows", &config.startWithWindows))
         SetStartWithWindows(config.startWithWindows);
     ImGui::Checkbox("Minimizar para a bandeja ao fechar", &config.minimizeToTrayOnClose);
-    ImGui::InputInt("Intervalo da varredura leve (minutos)", &config.backgroundScanIntervalMinutes);
+    // Minimo de 5 min: a varredura leve ainda faz I/O real (Shell API +
+    // soma recursiva de %TEMP%), entao um intervalo muito baixo (ou 0/negativo)
+    // faria essa worker thread rodar quase sem parar. UiState::Tick tambem
+    // clampa isso como segunda linha de defesa.
+    if (ImGui::InputInt("Intervalo da varredura leve (minutos)", &config.backgroundScanIntervalMinutes))
+        config.backgroundScanIntervalMinutes = std::max(config.backgroundScanIntervalMinutes, 5);
 
     ImGui::Separator();
     ImGui::TextUnformatted("Limpeza automatica");

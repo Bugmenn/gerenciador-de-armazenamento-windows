@@ -46,7 +46,13 @@ struct UiState {
     std::vector<HistoryEntry> history;
     std::atomic<bool> historyLoaded{false};
 
-    // Segundo plano / bandeja.
+    // Segundo plano / bandeja. A varredura leve roda em worker thread própria
+    // (mesmo padrão de scan/clean) porque, apesar do nome, ainda faz I/O
+    // bloqueante (Shell API + varredura recursiva de %TEMP%) — rodar direto
+    // em Tick() travaria a UI a cada intervalo (ver ScanEngine::RunLightBackgroundScan).
+    std::thread lightScanThread;
+    std::atomic<bool> lightScanInProgress{false};
+    mutable std::mutex lightScanMutex;
     LightScanTotals lightTotals;
     std::chrono::steady_clock::time_point lastLightScan{};
     std::chrono::system_clock::time_point lastAutoCleanCheck{};
@@ -75,10 +81,27 @@ struct UiState {
 
     std::vector<ScanItem> CollectSelectedItems() const;
 
+    // Thread-safe: lightTotals é escrito pela worker thread da varredura
+    // leve (ver Tick()), então painéis de UI devem ler por aqui, nunca o
+    // campo diretamente.
+    LightScanTotals GetLightTotals() const {
+        std::lock_guard<std::mutex> lock(lightScanMutex);
+        return lightTotals;
+    }
+
     ~UiState() {
+        // Precisa parar as duas worker threads (scan e clean) ANTES que
+        // qualquer membro comece a ser destruído: ambas capturam referências
+        // a ProgressChannel/Config/etc. desta struct, e a ordem de
+        // destruição de membros por si só não seria uma garantia segura o
+        // suficiente (é frágil a reordenações futuras dos campos abaixo).
+        scanEngine.StopAndWait();
         if (cleanThread.joinable()) {
             cleanCancel.store(true);
             cleanThread.join();
+        }
+        if (lightScanThread.joinable()) {
+            lightScanThread.join();
         }
     }
 };
