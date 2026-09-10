@@ -1,0 +1,67 @@
+# gerenciador-de-armazenamento-windows — Contexto do Projeto
+
+## Identificação
+- **Caminho:** raiz deste repositório
+- **Stack:** C++20, Dear ImGui (Win32 + DirectX 11), CMake (FetchContent), nlohmann::json
+- **Tipo:** Aplicativo desktop Windows (app de otimização/limpeza de armazenamento)
+
+---
+
+## Arquitetura
+
+- `include/storagecleaner/` — modelo de dados e contratos compartilhados, independentes de UI:
+  `ScanItem`/`Category`, `Config`, `ScanResult`, `HistoryEntry`, `ProgressState`
+  (canal de progresso thread-safe), `Scanner.h` (assinaturas dos scanners e
+  `ScanEngine`), `Cleaner.h`, `ConfigStore.h`/`HistoryStore.h` (persistência JSON),
+  `DuplicateGrouping.h` (única lógica 100% livre de Win32 — testável fora do Windows).
+- `src/scanners/` — um scanner por categoria (temporários, cache de navegador,
+  duplicados, logs antigos, Lixeira, pontos de restauração, dados órfãos de
+  apps desinstalados) + `ScanEngine.cpp` orquestrando tudo numa worker thread.
+- `src/cleaner/` — `Cleaner.cpp` (exclusão via `IFileOperation`/Lixeira ou
+  permanente conforme a categoria), `RecycleBinOps.cpp`, `VssRestorePoints.cpp`
+  (wrapper de `vssadmin` via `CreateProcess`).
+- `src/ui/` — Dear ImGui: `App.cpp` (bootstrap Win32+DX11+ImGui, loop principal,
+  ícone na bandeja), `UiState.*` (todo o estado de UI: seleção, agendamento de
+  auto-clean, varredura leve em segundo plano), painéis por aba (`DashboardPanel`,
+  `ResultsPanel`, `SettingsPanel`, `HistoryPanel`), `TrayIcon.*` (bandeja +
+  auto-início via registro).
+- Threading: uma worker thread por operação (scan/clean), progresso exposto
+  via `ProgressChannel` (mutex + snapshot, sem fila lock-free).
+
+## Padrões de Desenvolvimento
+
+- Categorias reversíveis (temp, cache, duplicados, logs, dados órfãos) vão
+  para a Lixeira do Windows ao serem removidas; só Lixeira e pontos de
+  restauração são permanentes (`IsPermanentCategory` em `ScanItem.h`).
+- "Dados órfãos" é heurístico (`IsHeuristicCategory`): desabilitado por
+  padrão, nunca pré-selecionado, nunca entra na limpeza automática.
+- Persistência em JSON (`%APPDATA%\StorageCleaner\config.json`/`history.json`),
+  escrita atômica via arquivo `.tmp` + `MoveFileExW`.
+- Comentários no código só explicam o "porquê" em pontos não óbvios (regras
+  de segurança, motivos de design) — nunca o "o quê".
+
+## Pitfalls / Cuidados
+
+- **Sem toolchain Windows neste ambiente de desenvolvimento** (container
+  Linux): o projeto não pode ser compilado/executado aqui, exceto a lógica
+  pura de `tests/test_duplicate_grouping.cpp` (sem dependência de Win32),
+  que de fato compila e roda neste ambiente. Todo o resto exige validação
+  numa máquina Windows real (ver seção "Verificado" no README.md).
+- Pontos de restauração exigem processo elevado (Administrador); sem isso o
+  scanner pula a categoria e avisa na UI em vez de falhar silenciosamente.
+- `vssadmin` tem saída em texto que varia por versão/idioma do Windows — o
+  parser em `VssRestorePoints.cpp` é propositalmente simples (linha a linha)
+  e pode precisar de ajuste em outras localidades.
+
+---
+
+## Registro de Atividades Recentes
+
+### [2026-09-10] Criação inicial do projeto
+**O que foi feito:** Implementado o app completo (scanners, cleaner, UI Dear ImGui, persistência JSON, agendamento de limpeza automática, bandeja/auto-início) e trazidos os arquivos pessoais de configuração do Claude Code (skills/agentes de `github.com/Bugmenn/claude`) para este repositório, junto com `CLAUDE.md` e `Memory/`.
+**Arquivos alterados:**
+- `include/storagecleaner/*.h` *(novo)* — modelo de dados
+- `src/**/*.cpp` *(novo)* — scanners, cleaner, UI
+- `CMakeLists.txt`, `tests/` *(novo)*
+- `.claude/agents/*.md`, `.claude/skills/*` *(novo)* — copiados de Bugmenn/claude
+- `CLAUDE.md`, `Memory/diretrizes.md`, `Memory/gerenciador-de-armazenamento-windows.memory` *(novo)*
