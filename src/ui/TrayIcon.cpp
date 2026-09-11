@@ -1,5 +1,7 @@
 #include "TrayIcon.h"
 
+#include "resource.h"
+
 #include <shellapi.h>
 
 #include <string>
@@ -26,7 +28,12 @@ void CreateTrayIcon(HWND hwnd) {
     g_iconData.uID = kTrayIconId;
     g_iconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_iconData.uCallbackMessage = kTrayCallbackMessage;
-    g_iconData.hIcon = ::LoadIconW(nullptr, IDI_APPLICATION);
+    // Mesmo icone de resources/app.rc usado na janela (App.cpp); carregado no
+    // tamanho pequeno de sistema (SM_CXSMICON) porque e' o que a bandeja
+    // exibe, em vez do generico IDI_APPLICATION.
+    g_iconData.hIcon = static_cast<HICON>(::LoadImageW(
+        ::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+        ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     wcsncpy_s(g_iconData.szTip, L"Otimizador de Armazenamento", _TRUNCATE);
     ::Shell_NotifyIconW(NIM_ADD, &g_iconData);
 }

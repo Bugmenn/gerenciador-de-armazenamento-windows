@@ -44,16 +44,6 @@ struct DirectoryStats {
     bool hasRecentActivity = false;
 };
 
-// Percorre `dir` recursivamente uma única vez, somando o tamanho de todos os
-// arquivos e verificando se algum foi escrito há menos de `thresholdDays`
-// dias. Existe para não fazer duas varreduras separadas (uma para tamanho,
-// outra para idade) e, principalmente, para não decidir "atividade recente"
-// olhando só o mtime da pasta de topo: no NTFS esse mtime só muda quando
-// entradas são criadas/removidas diretamente nela, não quando arquivos em
-// subpastas são escritos — então um app que só grava em subpastas profundas
-// pareceria "inativo" mesmo em uso diário se só o topo fosse checado.
-DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays);
-
 // Callback chamado para cada arquivo regular encontrado por ForEachFileRecursive.
 using FileVisitor = std::function<void(const std::wstring& path, std::uint64_t sizeBytes)>;
 
@@ -61,10 +51,23 @@ using FileVisitor = std::function<void(const std::wstring& path, std::uint64_t s
 // pastas de outros usuários sem privilégio de leitura), chamando `visitor`
 // para cada arquivo regular encontrado. Interrompe a varredura assim que
 // `cancel` for sinalizado. Compartilhado pelos scanners de temporários, logs
-// antigos e duplicados para não reimplementar a mesma iteração de
-// recursive_directory_iterator + skip_permission_denied em cada um.
+// antigos e duplicados, e por DirectorySize/ComputeDirectoryStats, para não
+// reimplementar a mesma iteração de recursive_directory_iterator +
+// skip_permission_denied em cada um.
 void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel,
                            const FileVisitor& visitor);
+
+// Percorre `dir` recursivamente uma única vez (via ForEachFileRecursive),
+// somando o tamanho de todos os arquivos e verificando se algum foi escrito
+// há menos de `thresholdDays` dias. Existe para não fazer duas varreduras
+// separadas (uma para tamanho, outra para idade) e, principalmente, para não
+// decidir "atividade recente" olhando só o mtime da pasta de topo: no NTFS
+// esse mtime só muda quando entradas são criadas/removidas diretamente nela,
+// não quando arquivos em subpastas são escritos — então um app que só grava
+// em subpastas profundas pareceria "inativo" mesmo em uso diário se só o
+// topo fosse checado.
+DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays,
+                                     std::atomic<bool>& cancel);
 
 // Executa um comando externo (ex: vssadmin, schtasks) capturando stdout.
 // Usado em vez de uma dependência externa de processo, já que os comandos

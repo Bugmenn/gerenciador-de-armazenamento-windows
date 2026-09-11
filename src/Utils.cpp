@@ -123,28 +123,6 @@ std::uint64_t DirectorySize(const std::wstring& dir, std::atomic<bool>& cancel) 
     return total;
 }
 
-DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays) {
-    DirectoryStats stats;
-    auto threshold =
-        fs::file_time_type::clock::now() - std::chrono::hours(static_cast<long long>(thresholdDays) * 24);
-
-    std::error_code ec;
-    fs::recursive_directory_iterator it(
-        dir, fs::directory_options::skip_permission_denied, ec);
-    fs::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        std::error_code fileEc;
-        if (!it->is_regular_file(fileEc) || fileEc) continue;
-
-        auto size = it->file_size(fileEc);
-        if (!fileEc) stats.totalBytes += size;
-
-        auto writeTime = it->last_write_time(fileEc);
-        if (!fileEc && writeTime >= threshold) stats.hasRecentActivity = true;
-    }
-    return stats;
-}
-
 void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel,
                           const FileVisitor& visitor) {
     std::error_code ec;
@@ -162,6 +140,22 @@ void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel,
 
         visitor(it->path().wstring(), size);
     }
+}
+
+DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays,
+                                     std::atomic<bool>& cancel) {
+    DirectoryStats stats;
+    auto threshold =
+        fs::file_time_type::clock::now() - std::chrono::hours(static_cast<long long>(thresholdDays) * 24);
+
+    ForEachFileRecursive(dir, cancel, [&](const std::wstring& path, std::uint64_t size) {
+        stats.totalBytes += size;
+
+        std::error_code timeEc;
+        auto writeTime = fs::last_write_time(path, timeEc);
+        if (!timeEc && writeTime >= threshold) stats.hasRecentActivity = true;
+    });
+    return stats;
 }
 
 CommandResult RunCommandCaptureOutput(const std::wstring& commandLine) {

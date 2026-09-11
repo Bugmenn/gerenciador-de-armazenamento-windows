@@ -2,7 +2,7 @@
 #include "storagecleaner/Utils.h"
 
 #include <windows.h>
-#include <knownfolders.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -178,7 +178,8 @@ void ScanAppDataRoot(const fs::path& root, const std::unordered_set<std::wstring
         // dias — evita marcar pastas de apps portáteis/raramente abertos que
         // ainda são válidos mas não aparecem no registro de programas
         // instalados.
-        util::DirectoryStats stats = util::ComputeDirectoryStats(entry.path().wstring(), inactivityDays);
+        util::DirectoryStats stats =
+            util::ComputeDirectoryStats(entry.path().wstring(), inactivityDays, cancel);
         if (stats.totalBytes == 0 || stats.hasRecentActivity) continue;
 
         out.push_back(

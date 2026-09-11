@@ -215,23 +215,35 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
 
     // Esvaziar a Lixeira é permanente e definitivo (ver IsPermanentCategory);
     // por isso está isolado do caminho "reversível" acima.
-    if (!cancel.load() && !recycleBinToEmpty.empty()) {
-        std::uint64_t freedBefore = 0;
-        for (const auto& item : recycleBinToEmpty) freedBefore += item.sizeBytes;
-
-        if (EmptyRecycleBin()) {
-            entry.bytesFreedByCategory[Category::RecycleBin] += freedBefore;
-            entry.totalBytesFreed += freedBefore;
-        } else {
-            entry.success = false;
+    if (!recycleBinToEmpty.empty()) {
+        if (cancel.load()) {
+            // Mesmo tratamento do bloco de restore points abaixo: sem isso,
+            // itens de "Lixeira" pendentes numa limpeza cancelada sumiriam
+            // silenciosamente do histórico em vez de aparecer como pulados.
             entry.itemsSkipped += recycleBinToEmpty.size();
-            if (!errorSummary.empty()) errorSummary += "; ";
-            errorSummary += "Falha ao esvaziar a Lixeira";
+        } else {
+            std::uint64_t freedBefore = 0;
+            for (const auto& item : recycleBinToEmpty) freedBefore += item.sizeBytes;
+
+            if (EmptyRecycleBin()) {
+                entry.bytesFreedByCategory[Category::RecycleBin] += freedBefore;
+                entry.totalBytesFreed += freedBefore;
+            } else {
+                entry.success = false;
+                entry.itemsSkipped += recycleBinToEmpty.size();
+                if (!errorSummary.empty()) errorSummary += "; ";
+                errorSummary += "Falha ao esvaziar a Lixeira";
+            }
         }
     }
 
     // Pontos de restauração removidos via vssadmin também não têm "desfazer".
-    if (!cancel.load() && !restorePointsToDelete.empty()) {
+    // Sem guarda externa por `!cancel.load()`: o cancelamento é checado dentro
+    // do laço, item a item, e cobre corretamente tanto "cancelado antes de
+    // chegar aqui" (i=0, cai direto no cancel abaixo) quanto "cancelado no
+    // meio do laço" — uma guarda externa faria o primeiro caso pular o bloco
+    // inteiro sem contabilizar nada em itemsSkipped.
+    if (!restorePointsToDelete.empty()) {
         for (std::size_t i = 0; i < restorePointsToDelete.size(); ++i) {
             if (cancel.load()) {
                 // Os itens ainda nao processados nao devem virar "sucesso

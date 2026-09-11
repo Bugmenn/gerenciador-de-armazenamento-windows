@@ -94,14 +94,18 @@ Este repositório também traz skills e subagentes pessoais em `.claude/skills/`
 e `.claude/agents/`, replicados de `github.com/Bugmenn/claude`.
 
 **Só compila/executa em Windows** (Win32, COM/`IFileOperation`, Shell APIs,
-VSS via `vssadmin`, DirectX 11). Neste ambiente de desenvolvimento (container
-Linux sem toolchain Windows) só é possível revisar código e compilar/rodar a
-única peça de lógica livre de Win32 (`tests/test_duplicate_grouping.cpp`) —
-o resto exige validação numa máquina Windows real.
+VSS via `vssadmin`, DirectX 11). A tool **Bash** desta sessão roda tipicamente
+num container Linux sem toolchain Windows (só dá pra rodar a lógica livre de
+Win32, `tests/test_duplicate_grouping.cpp`) — mas a tool **PowerShell** roda
+na máquina Windows real do usuário. Se o Visual Studio (com a carga "Desktop
+development with C++") estiver instalado aí, **é possível compilar o projeto
+inteiro de verdade via PowerShell** (ver "Build real via PowerShell" abaixo)
+em vez de só revisar código por leitura — confirmado nesta sessão: build
+limpo, 0 erros, 0 warnings, `ctest` passando.
 
 ## Comandos
 
-Build (MSVC):
+Build (MSVC, dentro do Visual Studio ou de um "Developer PowerShell"):
 ```powershell
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
@@ -116,6 +120,26 @@ cmake --build build
 Dear ImGui e `nlohmann::json` são baixados automaticamente via
 `FetchContent` — não precisa instalar SDK separado.
 
+### Build real via PowerShell (fora de um Developer Prompt)
+
+A tool PowerShell não herda as variáveis de ambiente do MSVC (`INCLUDE`,
+`LIB`, `PATH` com `cl.exe`) só por existir o Visual Studio instalado — é
+preciso popular o ambiente chamando `VsDevCmd.bat` antes do CMake/Ninja, na
+mesma invocação de `cmd /c` (variáveis não sobrevivem entre chamadas
+separadas da tool):
+```powershell
+$vsPath = "C:\Program Files\Microsoft Visual Studio\2022\Community"
+$vsDevCmd = "$vsPath\Common7\Tools\VsDevCmd.bat"
+$buildDir = "<repo>\out\build\x64-Debug"   # ou o dir configurado pelo VS/CMakePresets
+$ninja = "$vsPath\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+$cmake = "$vsPath\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+
+cmd /c "call `"$vsDevCmd`" -arch=x64 -no_logo >nul && `"$cmake`" `"$buildDir`" >nul && cd /d `"$buildDir`" && `"$ninja`""
+```
+Se o Visual Studio ainda não tiver a carga "Desktop development with C++"
+(compilador MSVC + CMake tools), o erro será `No CMAKE_CXX_COMPILER could be
+found` — instalar via Visual Studio Installer > Modificar.
+
 Testes (só `test_duplicate_grouping` roda fora do Windows — é a única lógica
 sem dependência de Win32/COM/VSS):
 ```powershell
@@ -126,6 +150,13 @@ ctest --test-dir build -R duplicate_grouping     # um teste específico
 
 Pontos de restauração (VSS) exigem rodar o `.exe` como Administrador; sem
 isso essa categoria é pulada e a UI mostra um aviso em vez de falhar.
+
+**Flags de compilador obrigatórias** (já em `CMakeLists.txt`, não repetir em
+código): `UNICODE`/`_UNICODE` (senão macros genéricas de recurso do Win32
+como `IDI_APPLICATION` resolvem para `LPSTR` e quebram chamadas `...W`),
+`NOMINMAX` (senão `windows.h` define macros `max`/`min` que colidem com
+`std::max`/`std::min`), `/EHsc` no MSVC (senão o `try/catch` real do projeto,
+ex. parsing de JSON em `HistoryStore.cpp`, fica sem garantia de unwind).
 
 ## Arquitetura
 
@@ -147,7 +178,12 @@ Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cl
   orquestrados sequencialmente por `ScanEngine` (`ScanEngine.cpp`) numa
   worker thread própria. `ScanEngine::StopAndWait()` deve ser chamado
   explicitamente antes de destruir qualquer `ProgressChannel` referenciado
-  pela worker — não depender só da ordem de destruição de membros.
+  pela worker — não depender só da ordem de destruição de membros. Todos os
+  scanners que percorrem arquivos recursivamente usam `util::ForEachFileRecursive`
+  (`Utils.h`) em vez de reimplementar `recursive_directory_iterator` +
+  `skip_permission_denied` — qualquer scanner novo que precise disso deve usar
+  o mesmo helper. `util::ComputeDirectoryStats`/`util::DirectorySize` também
+  são implementados em cima dele (não reimplementar a iteração de novo).
 - **`src/cleaner/`** — `Cleaner.cpp` decide, por categoria, se a exclusão é
   reversível (via `IFileOperation` + Lixeira, com `IFileOperationProgressSink`
   para saber item a item se a remoção realmente aconteceu) ou permanente
@@ -162,6 +198,10 @@ Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cl
   dos `*Panel.cpp`, que só desenham), painéis por aba (`DashboardPanel`,
   `ResultsPanel`, `SettingsPanel`, `HistoryPanel`), `TrayIcon.*` (bandeja +
   auto-início via registro do Windows).
+- **`resources/`** — recurso Win32 do executável: `app.ico` (multi-resolução),
+  `app.rc` e `resource.h` (`IDI_APP_ICON`, compartilhado entre o `.rc` e o C++
+  via `#include "resource.h"`). Usado por `App.cpp` (ícone da janela/taskbar)
+  e `TrayIcon.cpp` (ícone da bandeja) via `LoadImageW(..., MAKEINTRESOURCEW(IDI_APP_ICON), ...)`.
 
 **Threading**: cada operação longa (scan, clean, varredura leve em segundo
 plano) roda em worker thread própria; progresso é publicado via

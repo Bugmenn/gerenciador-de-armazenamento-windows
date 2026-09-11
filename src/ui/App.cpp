@@ -4,6 +4,8 @@
 #include "UiState.h"
 #include "storagecleaner/ConfigStore.h"
 
+#include "resource.h"
+
 #include <d3d11.h>
 #include <tchar.h>
 
@@ -148,9 +150,21 @@ int RunApp(bool startMinimized) {
     state.config = LoadConfig();
     g_uiState = &state;
 
+    HINSTANCE hInstance = ::GetModuleHandleW(nullptr);
+    // Mesmo icone (resources/app.rc) usado na janela/taskbar e na bandeja
+    // (TrayIcon.cpp) — LoadImageW com SM_CX/CYICON e SM_CX/CYSMICON pede ao
+    // Win32 o tamanho já mais próximo do necessário em vez de depender de
+    // reescala posterior.
+    HICON appIcon = static_cast<HICON>(::LoadImageW(
+        hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXICON),
+        ::GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    HICON appIconSmall = static_cast<HICON>(::LoadImageW(
+        hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON),
+        ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+
     WNDCLASSEXW wc{sizeof(wc),        CS_CLASSDC, WndProc, 0L,   0L,
-                  ::GetModuleHandleW(nullptr), nullptr,   nullptr, nullptr, nullptr,
-                  L"StorageCleanerWindowClass", nullptr};
+                  hInstance, appIcon,   nullptr, nullptr, nullptr,
+                  L"StorageCleanerWindowClass", appIconSmall};
     ::RegisterClassExW(&wc);
     HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Otimizador de Armazenamento",
                                WS_OVERLAPPEDWINDOW, 100, 100, 1024, 720, nullptr, nullptr,

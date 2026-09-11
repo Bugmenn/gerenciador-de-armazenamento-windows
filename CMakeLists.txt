@@ -65,9 +65,25 @@ add_executable(StorageCleaner WIN32
     src/ui/ResultsPanel.cpp
     src/ui/SettingsPanel.cpp
     src/ui/HistoryPanel.cpp
+    resources/app.rc
 )
 
-target_include_directories(StorageCleaner PRIVATE include src)
+target_include_directories(StorageCleaner PRIVATE include src resources)
+
+# UNICODE/_UNICODE: todo o codigo usa APIs Win32 explicitamente wide (CreateFileW,
+# RegOpenKeyExW etc.), mas macros genericas de recurso como IDI_APPLICATION dependem
+# dessas defines para resolver para a variante wide (sem isso, LoadIconW recebe um
+# LPSTR e nao compila). NOMINMAX evita que windows.h defina macros `max`/`min` que
+# colidem com chamadas a std::max/std::min (ex.: UiState.cpp).
+target_compile_definitions(StorageCleaner PRIVATE UNICODE _UNICODE NOMINMAX)
+
+# /EHsc: sem essa flag o MSVC nao habilita semantica padrao de excecao C++
+# (warning C4530 em todo arquivo que inclui <string>/<chrono>) e o try/catch
+# real do projeto (ex.: parsing de JSON em HistoryStore.cpp) fica sem garantia
+# de unwind correto.
+if(MSVC)
+    target_compile_options(StorageCleaner PRIVATE /EHsc)
+endif()
 
 target_link_libraries(StorageCleaner PRIVATE
     imgui

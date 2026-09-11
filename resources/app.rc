@@ -1,0 +1,6 @@
+#include "resource.h"
+
+// Primeiro (e unico) ICON do .rc: vira automaticamente o icone padrao do
+// .exe no Explorer, alem de ser carregado explicitamente por App.cpp
+// (janela/taskbar) e TrayIcon.cpp (bandeja) via MAKEINTRESOURCEW(IDI_APP_ICON).
+IDI_APP_ICON ICON "app.ico"
