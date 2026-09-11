@@ -102,14 +102,18 @@ std::string HashFileSHA256(const std::wstring& path) {
     return result;
 }
 
-bool IsOlderThanDays(const std::wstring& path, int days) {
+bool IsOlderThanHours(const std::wstring& path, int hours) {
     std::error_code ec;
     auto ftime = fs::last_write_time(path, ec);
     if (ec) return false;
 
     auto now = fs::file_time_type::clock::now();
     auto age = std::chrono::duration_cast<std::chrono::hours>(now - ftime).count();
-    return age >= static_cast<long long>(days) * 24;
+    return age >= static_cast<long long>(hours);
+}
+
+bool IsOlderThanDays(const std::wstring& path, int days) {
+    return IsOlderThanHours(path, days * 24);
 }
 
 std::uint64_t DirectorySize(const std::wstring& dir) {
@@ -126,6 +130,47 @@ std::uint64_t DirectorySize(const std::wstring& dir) {
         }
     }
     return total;
+}
+
+DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays) {
+    DirectoryStats stats;
+    auto threshold =
+        fs::file_time_type::clock::now() - std::chrono::hours(static_cast<long long>(thresholdDays) * 24);
+
+    std::error_code ec;
+    fs::recursive_directory_iterator it(
+        dir, fs::directory_options::skip_permission_denied, ec);
+    fs::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        std::error_code fileEc;
+        if (!it->is_regular_file(fileEc) || fileEc) continue;
+
+        auto size = it->file_size(fileEc);
+        if (!fileEc) stats.totalBytes += size;
+
+        auto writeTime = it->last_write_time(fileEc);
+        if (!fileEc && writeTime >= threshold) stats.hasRecentActivity = true;
+    }
+    return stats;
+}
+
+void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel,
+                          const FileVisitor& visitor) {
+    std::error_code ec;
+    fs::recursive_directory_iterator it(
+        dir, fs::directory_options::skip_permission_denied, ec);
+    fs::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        if (cancel.load()) return;
+
+        std::error_code fileEc;
+        if (!it->is_regular_file(fileEc) || fileEc) continue;
+
+        auto size = it->file_size(fileEc);
+        if (fileEc) continue;
+
+        visitor(it->path().wstring(), size);
+    }
 }
 
 CommandResult RunCommandCaptureOutput(const std::wstring& commandLine) {

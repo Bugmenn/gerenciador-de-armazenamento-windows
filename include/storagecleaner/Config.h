@@ -30,6 +30,11 @@ struct CategoryConfig {
 
 struct Config {
     std::uint64_t minFileSizeBytes = 4096;
+    // Arquivo em %TEMP%/Windows\Temp só é candidato a "temporário" se não foi
+    // escrito nas últimas N horas — evita marcar para exclusão um arquivo que
+    // um processo em execução ainda está usando (instalador extraindo,
+    // download em andamento, autosave).
+    int tempFilesMinAgeHours = 1;
     int oldLogsThresholdDays = 30;
     int restorePointsToKeep = 2;
     // Pasta de AppData sem app instalado correspondente só é candidata a

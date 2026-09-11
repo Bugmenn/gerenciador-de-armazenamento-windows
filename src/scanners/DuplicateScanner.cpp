@@ -37,22 +37,16 @@ std::vector<ScanItem> ScanDuplicates(const Config& config, ProgressChannel& prog
 
     // Passo 1: agrupa por tamanho exato. Arquivos de tamanhos diferentes
     // nunca são duplicados, então isso descarta a maioria dos arquivos sem
-    // precisar ler o conteúdo de nenhum deles.
-    std::unordered_map<std::uint64_t, std::vector<fs::path>> bySize;
+    // precisar ler o conteúdo de nenhum deles. Guarda o caminho como wstring
+    // (não fs::path) para não pagar a conversão extra toda vez que for lido
+    // depois no passo 2.
+    std::unordered_map<std::uint64_t, std::vector<std::wstring>> bySize;
     for (const auto& root : roots) {
         if (cancel.load()) break;
-        std::error_code ec;
-        fs::recursive_directory_iterator it(
-            root, fs::directory_options::skip_permission_denied, ec);
-        fs::recursive_directory_iterator end;
-        for (; it != end && !ec; it.increment(ec)) {
-            if (cancel.load()) break;
-            std::error_code fileEc;
-            if (!it->is_regular_file(fileEc) || fileEc) continue;
-            auto size = it->file_size(fileEc);
-            if (fileEc || size < config.minFileSizeBytes) continue;
-            bySize[size].push_back(it->path());
-        }
+        util::ForEachFileRecursive(root, cancel, [&](const std::wstring& path, std::uint64_t size) {
+            if (size < config.minFileSizeBytes) return;
+            bySize[size].push_back(path);
+        });
     }
 
     // Passo 2: só faz hash dentro de cada grupo de mesmo tamanho — o custo de
@@ -69,7 +63,7 @@ std::vector<ScanItem> ScanDuplicates(const Config& config, ProgressChannel& prog
             if (cancel.load()) break;
 
             HashedFile file;
-            file.path = path.wstring();
+            file.path = path;
             file.sizeBytes = size;
             file.sha256Hex = util::HashFileSHA256(file.path);
 
@@ -80,7 +74,7 @@ std::vector<ScanItem> ScanDuplicates(const Config& config, ProgressChannel& prog
             hashed.push_back(std::move(file));
 
             snapshot.itemsProcessed++;
-            snapshot.currentItem = path.wstring();
+            snapshot.currentItem = path;
             if (snapshot.itemsProcessed % 16 == 0) progress.Update(snapshot);
         }
 

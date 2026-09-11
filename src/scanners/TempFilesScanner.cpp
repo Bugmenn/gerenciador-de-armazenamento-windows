@@ -15,26 +15,22 @@ namespace {
 void ScanDirForTempFiles(const fs::path& dir, const Config& config,
                          ProgressChannel& progress, std::atomic<bool>& cancel,
                          std::vector<ScanItem>& out, ProgressSnapshot& snapshot) {
-    std::error_code ec;
-    fs::recursive_directory_iterator it(
-        dir, fs::directory_options::skip_permission_denied, ec);
-    fs::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        if (cancel.load()) return;
+    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const std::wstring& path,
+                                                          std::uint64_t size) {
+        if (size < config.minFileSizeBytes) return;
+        // Sem esse filtro de idade, um temporário criado há segundos por um
+        // processo em execução (instalador extraindo, download em andamento,
+        // autosave) poderia ser marcado para exclusão só por já ultrapassar o
+        // tamanho mínimo.
+        if (!util::IsOlderThanHours(path, config.tempFilesMinAgeHours)) return;
 
-        std::error_code fileEc;
-        if (!it->is_regular_file(fileEc) || fileEc) continue;
-
-        auto size = it->file_size(fileEc);
-        if (fileEc || size < config.minFileSizeBytes) continue;
-
-        out.push_back(ScanItem{it->path().wstring(), size, Category::TempFiles, L"", false});
+        out.push_back(ScanItem{path, size, Category::TempFiles, L"", false});
 
         snapshot.itemsProcessed++;
         snapshot.bytesFoundSoFar += size;
-        snapshot.currentItem = it->path().wstring();
+        snapshot.currentItem = path;
         if (snapshot.itemsProcessed % 32 == 0) progress.Update(snapshot);
-    }
+    });
 }
 
 } // namespace

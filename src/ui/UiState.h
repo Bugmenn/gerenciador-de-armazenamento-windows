@@ -85,6 +85,19 @@ struct UiState {
 
     std::vector<ScanItem> CollectSelectedItems() const;
 
+    struct SelectionSummary {
+        std::uint64_t bytes = 0;
+        std::size_t count = 0;
+        bool anyPermanent = false;
+    };
+    // Resumo da seleção sem copiar ScanItem (que carrega dois wstring cada) —
+    // usado nos pontos desenhados a cada frame (total selecionado, modal de
+    // confirmação aberto) para não pagar milhares de alocações de string só
+    // para somar bytes. CollectSelectedItems() continua existindo para os
+    // caminhos que realmente precisam da lista de itens (ex: clique em
+    // "Confirmar e limpar").
+    SelectionSummary GetSelectionSummary() const;
+
     // Thread-safe: lightTotals é escrito pela worker thread da varredura
     // leve (ver Tick()), então painéis de UI devem ler por aqui, nunca o
     // campo diretamente.

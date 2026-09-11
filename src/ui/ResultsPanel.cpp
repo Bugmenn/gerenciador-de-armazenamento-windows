@@ -66,8 +66,8 @@ void DrawResultsPanel(UiState& state) {
         return;
     }
 
-    std::uint64_t selectedBytes = 0;
-    for (const auto& item : state.CollectSelectedItems()) selectedBytes += item.sizeBytes;
+    UiState::SelectionSummary selection = state.GetSelectionSummary();
+    std::uint64_t selectedBytes = selection.bytes;
 
     for (std::size_t i = 0; i < state.lastScanResult.buckets.size(); ++i) {
         const CategoryBucket& bucket = state.lastScanResult.buckets[i];
@@ -87,22 +87,19 @@ void DrawResultsPanel(UiState& state) {
     if (state.showCleanConfirmModal) ImGui::OpenPopup("Confirmar limpeza");
     if (ImGui::BeginPopupModal("Confirmar limpeza", &state.showCleanConfirmModal,
                               ImGuiWindowFlags_AlwaysAutoResize)) {
-        std::vector<ScanItem> selectedItems = state.CollectSelectedItems();
-        bool anyPermanent = false;
-        for (const auto& item : selectedItems)
-            if (IsPermanentCategory(item.category)) anyPermanent = true;
-
-        ImGui::Text("Isso vai remover %zu item(ns), liberando %s.", selectedItems.size(),
-                   util::FormatSize(selectedBytes).c_str());
+        ImGui::Text("Isso vai remover %zu item(ns), liberando %s.", selection.count,
+                   util::FormatSize(selection.bytes).c_str());
         ImGui::TextUnformatted("Arquivos temporarios, cache, duplicados, logs e dados orfaos vao"
                               " para a Lixeira (podem ser restaurados).");
-        if (anyPermanent)
+        if (selection.anyPermanent)
             ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1),
                               "Atencao: Lixeira e/ou pontos de restauracao selecionados serao "
                               "removidos em definitivo, sem opcao de desfazer.");
 
+        // A lista completa de itens (com paths) só precisa existir de fato no
+        // clique do botão — não a cada frame enquanto o modal fica aberto.
         if (ImGui::Button("Confirmar e limpar", ImVec2(180, 0))) {
-            state.StartClean(selectedItems, state.currentScanIsAutoClean);
+            state.StartClean(state.CollectSelectedItems(), state.currentScanIsAutoClean);
             state.showCleanConfirmModal = false;
             ImGui::CloseCurrentPopup();
         }

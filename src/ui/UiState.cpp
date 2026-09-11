@@ -100,6 +100,23 @@ std::vector<ScanItem> UiState::CollectSelectedItems() const {
     return result;
 }
 
+UiState::SelectionSummary UiState::GetSelectionSummary() const {
+    SelectionSummary summary;
+    for (std::size_t bucketIdx = 0; bucketIdx < lastScanResult.buckets.size(); ++bucketIdx) {
+        if (bucketIdx >= selection.size()) continue;
+        const auto& bucket = lastScanResult.buckets[bucketIdx];
+        const auto& sel = selection[bucketIdx];
+        bool permanent = IsPermanentCategory(bucket.category);
+        for (std::size_t itemIdx = 0; itemIdx < bucket.items.size(); ++itemIdx) {
+            if (itemIdx >= sel.size() || !sel[itemIdx]) continue;
+            summary.bytes += bucket.items[itemIdx].sizeBytes;
+            summary.count++;
+            if (permanent) summary.anyPermanent = true;
+        }
+    }
+    return summary;
+}
+
 void UiState::Tick() {
     // Absorve o resultado da varredura, se pronto, e prepara a seleção
     // (todas as categorias, exceto as heurísticas, já vêm marcadas).

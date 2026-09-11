@@ -117,7 +117,13 @@ bool ContainsAsSubstring(const std::wstring& haystack, const std::wstring& needl
 }
 
 bool MatchesAnyInstalledApp(const std::wstring& normalizedFolderName,
+                            const std::unordered_set<std::wstring>& exactNames,
                             const std::vector<std::wstring>& normalizedKnownNames) {
+    // Caminho comum, O(1): a maioria das pastas de AppData tem nome idêntico
+    // (após normalização) ao app instalado. Só cai no laço de substring
+    // (mais caro, O(n) comparações de string) quando não há match exato.
+    if (exactNames.count(normalizedFolderName) > 0) return true;
+
     for (const auto& known : normalizedKnownNames) {
         if (known.empty()) continue;
         // Substring nos dois sentidos: "steam" deve casar com "valve steam" e
@@ -131,8 +137,9 @@ bool MatchesAnyInstalledApp(const std::wstring& normalizedFolderName,
     return false;
 }
 
-void ScanAppDataRoot(const fs::path& root, const std::vector<std::wstring>& normalizedKnownNames,
-                    int inactivityDays, std::vector<ScanItem>& out, ProgressSnapshot& snapshot,
+void ScanAppDataRoot(const fs::path& root, const std::unordered_set<std::wstring>& exactNames,
+                    const std::vector<std::wstring>& normalizedKnownNames, int inactivityDays,
+                    std::vector<ScanItem>& out, ProgressSnapshot& snapshot,
                     ProgressChannel& progress, std::atomic<bool>& cancel) {
     std::error_code ec;
     if (!fs::is_directory(root, ec) || ec) return;
@@ -147,20 +154,23 @@ void ScanAppDataRoot(const fs::path& root, const std::vector<std::wstring>& norm
         std::wstring normalized = Normalize(folderName);
         if (normalized.empty() || IsKnownInfrastructureFolder(normalized)) continue;
 
-        if (MatchesAnyInstalledApp(normalized, normalizedKnownNames)) continue;
+        if (MatchesAnyInstalledApp(normalized, exactNames, normalizedKnownNames)) continue;
 
-        // Só é candidata a "orfã" se, além de não casar com nenhum app
-        // conhecido, também estiver inativa há tempo suficiente — evita
-        // marcar pastas de apps portáteis/raramente abertos que ainda são
-        // válidos mas não aparecem no registro de programas instalados.
-        if (!util::IsOlderThanDays(entry.path().wstring(), inactivityDays)) continue;
+        // Uma única varredura recursiva decide tamanho E atividade recente
+        // (em vez de checar o mtime só da pasta de topo, que no NTFS não
+        // reflete escritas em subpastas — ver ComputeDirectoryStats). Só é
+        // candidata a "orfã" se, além de não casar com nenhum app conhecido,
+        // nenhum arquivo da árvore foi escrito nos últimos `inactivityDays`
+        // dias — evita marcar pastas de apps portáteis/raramente abertos que
+        // ainda são válidos mas não aparecem no registro de programas
+        // instalados.
+        util::DirectoryStats stats = util::ComputeDirectoryStats(entry.path().wstring(), inactivityDays);
+        if (stats.totalBytes == 0 || stats.hasRecentActivity) continue;
 
-        std::uint64_t size = util::DirectorySize(entry.path().wstring());
-        if (size == 0) continue;
-
-        out.push_back(ScanItem{entry.path().wstring(), size, Category::OrphanedApps, L"", true});
+        out.push_back(
+            ScanItem{entry.path().wstring(), stats.totalBytes, Category::OrphanedApps, L"", true});
         snapshot.itemsProcessed++;
-        snapshot.bytesFoundSoFar += size;
+        snapshot.bytesFoundSoFar += stats.totalBytes;
         snapshot.currentItem = entry.path().wstring();
         progress.Update(snapshot);
     }
@@ -179,15 +189,17 @@ std::vector<ScanItem> ScanOrphanedAppData(const Config& config, ProgressChannel&
     for (const auto& name : CollectInstalledAppNames()) normalizedKnownNames.push_back(Normalize(name));
     for (const auto& name : CollectProgramFilesFolderNames())
         normalizedKnownNames.push_back(Normalize(name));
+    std::unordered_set<std::wstring> exactNames(normalizedKnownNames.begin(),
+                                                normalizedKnownNames.end());
 
     for (const auto& profileDir : util::EnumerateUserProfileDirs()) {
         if (cancel.load()) break;
         fs::path appData = fs::path(profileDir) / L"AppData";
-        ScanAppDataRoot(appData / L"Roaming", normalizedKnownNames,
+        ScanAppDataRoot(appData / L"Roaming", exactNames, normalizedKnownNames,
                        config.orphanedAppsInactivityDays, items, snapshot, progress, cancel);
-        ScanAppDataRoot(appData / L"Local", normalizedKnownNames,
+        ScanAppDataRoot(appData / L"Local", exactNames, normalizedKnownNames,
                        config.orphanedAppsInactivityDays, items, snapshot, progress, cancel);
-        ScanAppDataRoot(appData / L"LocalLow", normalizedKnownNames,
+        ScanAppDataRoot(appData / L"LocalLow", exactNames, normalizedKnownNames,
                        config.orphanedAppsInactivityDays, items, snapshot, progress, cancel);
     }
 

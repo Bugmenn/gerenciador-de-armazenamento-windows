@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -23,12 +25,42 @@ std::string WideToUtf8(const std::wstring& wide);
 // Converte string UTF-8 para wstring (para ler paths salvos em JSON).
 std::wstring Utf8ToWide(const std::string& utf8);
 
-// Retorna true se o arquivo foi modificado há mais de `days` dias.
+// Retorna true se o arquivo foi modificado há mais de `hours`/`days`.
+bool IsOlderThanHours(const std::wstring& path, int hours);
 bool IsOlderThanDays(const std::wstring& path, int days);
 
 // Soma recursivamente o tamanho de todos os arquivos sob `dir`. Usado para
 // dimensionar pastas inteiras (ex: cache de navegador) como um único item.
 std::uint64_t DirectorySize(const std::wstring& dir);
+
+struct DirectoryStats {
+    std::uint64_t totalBytes = 0;
+    // true se algum arquivo da árvore (em qualquer profundidade) foi escrito
+    // há menos de `thresholdDays` dias, conforme passado a ComputeDirectoryStats.
+    bool hasRecentActivity = false;
+};
+
+// Percorre `dir` recursivamente uma única vez, somando o tamanho de todos os
+// arquivos e verificando se algum foi escrito há menos de `thresholdDays`
+// dias. Existe para não fazer duas varreduras separadas (uma para tamanho,
+// outra para idade) e, principalmente, para não decidir "atividade recente"
+// olhando só o mtime da pasta de topo: no NTFS esse mtime só muda quando
+// entradas são criadas/removidas diretamente nela, não quando arquivos em
+// subpastas são escritos — então um app que só grava em subpastas profundas
+// pareceria "inativo" mesmo em uso diário se só o topo fosse checado.
+DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays);
+
+// Callback chamado para cada arquivo regular encontrado por ForEachFileRecursive.
+using FileVisitor = std::function<void(const std::wstring& path, std::uint64_t sizeBytes)>;
+
+// Percorre `dir` recursivamente (ignorando erros de permissão, na prática
+// pastas de outros usuários sem privilégio de leitura), chamando `visitor`
+// para cada arquivo regular encontrado. Interrompe a varredura assim que
+// `cancel` for sinalizado. Compartilhado pelos scanners de temporários, logs
+// antigos e duplicados para não reimplementar a mesma iteração de
+// recursive_directory_iterator + skip_permission_denied em cada um.
+void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel,
+                           const FileVisitor& visitor);
 
 // Executa um comando externo (ex: vssadmin, schtasks) capturando stdout.
 // Usado em vez de uma dependência externa de processo, já que os comandos

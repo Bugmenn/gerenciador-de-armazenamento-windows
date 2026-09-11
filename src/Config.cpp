@@ -18,6 +18,7 @@ void SanitizeConfig(Config& config) {
     // Fonte unica desses limites — chamada tanto ao carregar config.json
     // quanto ao editar pela UI, para nao duplicar a mesma regra em varios
     // lugares (e arriscar divergir se um dos limites mudar no futuro).
+    if (config.tempFilesMinAgeHours < 0) config.tempFilesMinAgeHours = 0;
     if (config.oldLogsThresholdDays < 0) config.oldLogsThresholdDays = 0;
     if (config.restorePointsToKeep < 0) config.restorePointsToKeep = 0;
     if (config.orphanedAppsInactivityDays < 0) config.orphanedAppsInactivityDays = 0;

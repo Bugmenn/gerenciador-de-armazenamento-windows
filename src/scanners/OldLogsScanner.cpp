@@ -15,28 +15,17 @@ namespace {
 void ScanDirForOldLogs(const fs::path& dir, const Config& config, ProgressChannel& progress,
                        std::atomic<bool>& cancel, std::vector<ScanItem>& out,
                        ProgressSnapshot& snapshot) {
-    std::error_code ec;
-    fs::recursive_directory_iterator it(
-        dir, fs::directory_options::skip_permission_denied, ec);
-    fs::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        if (cancel.load()) return;
+    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const std::wstring& path,
+                                                          std::uint64_t size) {
+        if (fs::path(path).extension() != L".log") return;
+        if (!util::IsOlderThanDays(path, config.oldLogsThresholdDays)) return;
 
-        std::error_code fileEc;
-        if (!it->is_regular_file(fileEc) || fileEc) continue;
-        if (it->path().extension() != L".log") continue;
-
-        if (!util::IsOlderThanDays(it->path().wstring(), config.oldLogsThresholdDays)) continue;
-
-        auto size = it->file_size(fileEc);
-        if (fileEc) continue;
-
-        out.push_back(ScanItem{it->path().wstring(), size, Category::OldLogs, L"", false});
+        out.push_back(ScanItem{path, size, Category::OldLogs, L"", false});
         snapshot.itemsProcessed++;
         snapshot.bytesFoundSoFar += size;
-        snapshot.currentItem = it->path().wstring();
+        snapshot.currentItem = path;
         if (snapshot.itemsProcessed % 32 == 0) progress.Update(snapshot);
-    }
+    });
 }
 
 } // namespace

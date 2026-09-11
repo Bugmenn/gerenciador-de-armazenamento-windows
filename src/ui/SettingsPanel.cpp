@@ -29,12 +29,14 @@ void DrawSettingsPanel(UiState& state) {
     // SanitizeConfig e' chamada uma unica vez apos os tres campos (em vez de
     // um `if` por campo) para nao precisar lembrar de repetir a chamada a
     // cada novo campo clampado que for adicionado aqui no futuro.
+    bool tempAgeChanged = ImGui::InputInt("Temporarios: idade minima (horas)",
+                                          &config.tempFilesMinAgeHours);
     bool logsChanged = ImGui::InputInt("Logs mais antigos que (dias)", &config.oldLogsThresholdDays);
     bool restoreChanged =
         ImGui::InputInt("Pontos de restauracao a manter", &config.restorePointsToKeep);
     bool orphanChanged = ImGui::InputInt("Dados orfaos: inativos ha pelo menos (dias)",
                                          &config.orphanedAppsInactivityDays);
-    if (logsChanged || restoreChanged || orphanChanged) SanitizeConfig(config);
+    if (tempAgeChanged || logsChanged || restoreChanged || orphanChanged) SanitizeConfig(config);
 
     ImGui::Separator();
     ImGui::TextUnformatted("Segundo plano");

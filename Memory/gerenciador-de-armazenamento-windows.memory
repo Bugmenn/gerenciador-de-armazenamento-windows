@@ -57,6 +57,27 @@
 
 ## Registro de Atividades Recentes
 
+### [2026-09-11] Revisão (arquitetura/otimização/code-review via subagentes) e correções aplicadas
+**O que foi feito:** Rodada de revisão usando as skills `arquitetura-projeto`, `otimizacao-codigo` e `code-review`, delegando a análise de otimização e o code review a subagentes (`general-purpose` e `revisor-codigo`, respectivamente) em paralelo. Arquitetura considerada bem desenhada, sem mudança estrutural necessária. Achados aplicados (usuário pediu para aplicar todos):
+- **TempFilesScanner sem filtro de idade**: podia marcar para exclusão um arquivo temporário criado há segundos por processo em execução (instalador, download, autosave). Adicionado `Config::tempFilesMinAgeHours` (padrão 1h, exposto em Configurações, clampado em `SanitizeConfig`) e checagem via novo `util::IsOlderThanHours`.
+- **OrphanedAppDataScanner com falso positivo de mtime**: usava o mtime da pasta de topo do app, que no NTFS não reflete escritas em subpastas. Substituído por `util::ComputeDirectoryStats(dir, thresholdDays)` — uma única varredura recursiva que calcula tamanho total E verifica se algum arquivo da árvore (qualquer profundidade) foi escrito dentro do limiar, eliminando também a dupla varredura que existia antes (`IsOlderThanDays` na raiz + `DirectorySize` separado).
+- **Matching de app instalado O(n) por substring**: adicionado `unordered_set` de nomes normalizados para checar igualdade exata em O(1) antes de cair no laço de substring (`MatchesAnyInstalledApp`).
+- **Duplicação entre scanners**: extraído `util::ForEachFileRecursive(dir, cancel, visitor)` em Utils, usado por `TempFilesScanner`, `OldLogsScanner` e `DuplicateScanner` (etapa de agrupar por tamanho) — antes cada um reimplementava a mesma iteração com `skip_permission_denied`.
+- **DuplicateScanner usando fs::path no mapa por tamanho**: trocado por `std::wstring` direto, evitando conversões repetidas.
+- **ResultsPanel copiando ScanItem inteiros por frame só para somar bytes**: `UiState::CollectSelectedItems()` (copia paths) era chamado a cada frame de UI. Adicionado `UiState::SelectionSummary`/`GetSelectionSummary()` (soma bytes/conta itens/detecta categoria permanente sem copiar `ScanItem`); `CollectSelectedItems()` agora só é chamado no clique de "Confirmar e limpar".
+- **HistoryStore reescreve o histórico inteiro a cada limpeza**: identificado como ponto de atenção de baixo impacto (não é hot-path); não corrigido — exigiria manter um cache em memória compartilhado entre a worker thread de limpeza e a UI, desproporcional ao ganho.
+**Arquivos alterados:**
+- `include/storagecleaner/Utils.h`, `src/Utils.cpp` — `IsOlderThanHours`, `ComputeDirectoryStats`, `ForEachFileRecursive`
+- `include/storagecleaner/Config.h`, `src/Config.cpp` — `tempFilesMinAgeHours` + clamp
+- `src/ui/SettingsPanel.cpp` — campo de UI para `tempFilesMinAgeHours`
+- `src/scanners/TempFilesScanner.cpp`, `src/scanners/OldLogsScanner.cpp` — usam `ForEachFileRecursive`; temp aplica filtro de idade
+- `src/scanners/DuplicateScanner.cpp` — usa `ForEachFileRecursive`, mapa por `wstring`
+- `src/scanners/OrphanedAppDataScanner.cpp` — `ComputeDirectoryStats`, `unordered_set` de nomes exatos
+- `src/ui/UiState.h`/`UiState.cpp` — `SelectionSummary`/`GetSelectionSummary()`
+- `src/ui/ResultsPanel.cpp` — usa `GetSelectionSummary()` em vez de copiar itens por frame
+**Pitfall novo:** sem `cmake`/`g++` disponíveis neste ambiente (além de sem toolchain Windows) — não foi possível compilar nem sequer o teste puro (`test_duplicate_grouping`) desta vez; a validação foi só por leitura cuidadosa. Build/teste real precisa rodar numa máquina Windows.
+
+
 ### [2026-09-10] Revisão de código (arquitetura-projeto, otimizacao-codigo, code-review) e correções
 **O que foi feito:** Revisão da PR #1 usando as skills `arquitetura-projeto` e `otimizacao-codigo` e a skill builtin `code-review` (o subagente `revisor-codigo` não está disponível como `subagent_type` nesta sessão — agentes custom de `.claude/agents/` não são auto-registrados como tipos de agente aqui). Achados e correções aplicadas:
 - **Use-after-free ao sair durante scan em andamento**: `~UiState()` só dava join na `cleanThread`; `ScanEngine` ganhou `StopAndWait()` (público, idempotente) chamado explicitamente no destrutor de `UiState`, em vez de depender da ordem de destruição de membros.
