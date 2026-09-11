@@ -1,4 +1,5 @@
 #include "Panels.h"
+#include "Theme.h"
 #include "storagecleaner/Utils.h"
 
 #include <imgui.h>
@@ -14,7 +15,7 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
     ImGui::PushID(static_cast<int>(bucketIdx));
 
     if (IsHeuristicCategory(bucket.category)) {
-        ImGui::TextColored(ImVec4(1, 0.75f, 0.2f, 1),
+        ImGui::TextColored(theme::kWarning,
                            "Heuristico: pode incluir falsos positivos (ex: apps portateis ou "
                            "pouco usados). Revise cada item antes de excluir.");
     }
@@ -92,7 +93,7 @@ void DrawResultsPanel(UiState& state) {
         ImGui::TextUnformatted("Arquivos temporarios, cache, duplicados, logs e dados orfaos vao"
                               " para a Lixeira (podem ser restaurados).");
         if (selection.anyPermanent)
-            ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1),
+            ImGui::TextColored(theme::kDanger,
                               "Atencao: Lixeira e/ou pontos de restauracao selecionados serao "
                               "removidos em definitivo, sem opcao de desfazer.");
 
@@ -113,7 +114,10 @@ void DrawResultsPanel(UiState& state) {
 
     if (cleaning) {
         ProgressSnapshot snapshot = state.cleanProgress.Read();
-        ImGui::ProgressBar(snapshot.fractionComplete);
+        DrawInlineCircularGauge(28.0f, 6.0f, snapshot.fractionComplete,
+                               ImGui::ColorConvertFloat4ToU32(theme::kAccentBlue),
+                               ImGui::ColorConvertFloat4ToU32(theme::kAccentGold),
+                               ImGui::ColorConvertFloat4ToU32(theme::kBorder));
         ImGui::TextUnformatted(PhaseLabel(snapshot.phase));
     }
 
@@ -122,10 +126,10 @@ void DrawResultsPanel(UiState& state) {
         if (state.pendingCleanResult.has_value()) {
             const HistoryEntry& entry = *state.pendingCleanResult;
             if (entry.success)
-                ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.4f, 1), "Limpeza concluida: %s liberados.",
+                ImGui::TextColored(theme::kSuccess, "Limpeza concluida: %s liberados.",
                                   util::FormatSize(entry.totalBytesFreed).c_str());
             else
-                ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "Limpeza concluida com erros: %s",
+                ImGui::TextColored(theme::kDanger, "Limpeza concluida com erros: %s",
                                   entry.errorSummary.c_str());
         }
     }

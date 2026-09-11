@@ -59,6 +59,7 @@ add_executable(StorageCleaner WIN32
     src/cleaner/RecycleBinOps.cpp
     src/cleaner/VssRestorePoints.cpp
     src/ui/App.cpp
+    src/ui/Theme.cpp
     src/ui/UiState.cpp
     src/ui/TrayIcon.cpp
     src/ui/DashboardPanel.cpp

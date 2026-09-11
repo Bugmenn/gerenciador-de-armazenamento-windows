@@ -1,4 +1,5 @@
 #include "Panels.h"
+#include "Theme.h"
 #include "storagecleaner/HistoryStore.h"
 #include "storagecleaner/Utils.h"
 
@@ -63,16 +64,16 @@ void DrawHistoryPanel(UiState& state) {
 
             ImGui::TableSetColumnIndex(3);
             if (entry.success && entry.itemsSkipped == 0) {
-                ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.4f, 1), "OK");
+                ImGui::TextColored(theme::kSuccess, "OK");
             } else if (entry.success) {
                 // Concluida sem erro, mas alguns itens sumiram/mudaram entre
                 // o scan e a limpeza (ver Cleaner::SendToRecycleBin) — nao e'
                 // uma falha, mas o usuario deve saber que nem tudo que foi
                 // selecionado acabou sendo removido.
-                ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "OK (%zu item(s) ignorado(s))",
+                ImGui::TextColored(theme::kWarning, "OK (%zu item(s) ignorado(s))",
                                    entry.itemsSkipped);
             } else {
-                ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "%s", entry.errorSummary.c_str());
+                ImGui::TextColored(theme::kDanger, "%s", entry.errorSummary.c_str());
             }
         }
         ImGui::EndTable();

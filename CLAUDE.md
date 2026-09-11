@@ -197,7 +197,13 @@ Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cl
   auto-clean — `Tick()` roda uma vez por frame e concentra essa lógica fora
   dos `*Panel.cpp`, que só desenham), painéis por aba (`DashboardPanel`,
   `ResultsPanel`, `SettingsPanel`, `HistoryPanel`), `TrayIcon.*` (bandeja +
-  auto-início via registro do Windows).
+  auto-início via registro do Windows), `Theme.h`/`Theme.cpp` (paleta central
+  `theme::k*`, `ApplyTheme()`/`LoadFonts()` chamados uma vez em `RunApp()`,
+  `AppFonts` guardado em `UiState::fonts`, e `DrawCircularGauge`/
+  `DrawInlineCircularGauge` — gauge circular customizado via `ImDrawList`
+  que substitui `ImGui::ProgressBar` nos pontos de progresso de scan/clean).
+  Qualquer cor de status (sucesso/aviso/erro) nova deve usar as constantes
+  de `theme::`, nunca `ImVec4` hardcoded.
 - **`resources/`** — recurso Win32 do executável: `app.ico` (multi-resolução),
   `app.rc` e `resource.h` (`IDI_APP_ICON`, compartilhado entre o `.rc` e o C++
   via `#include "resource.h"`). Usado por `App.cpp` (ícone da janela/taskbar)
@@ -208,6 +214,16 @@ plano) roda em worker thread própria; progresso é publicado via
 `ProgressChannel` e lido pela UI thread a cada frame — nunca ler campos de
 progresso/resultado compartilhados diretamente sem passar pelo canal/mutex
 correspondente (ex.: `UiState::GetLightTotals()`).
+
+**Bug conhecido, ainda sem correção**: em `ResultsPanel.cpp`, dentro de
+`DrawCategoryTable`, o checkbox da linha 0 (primeiro item de qualquer
+categoria expandida) nunca responde a clique — confirmado por reprodução
+real (mouse físico) em pelo menos duas categorias diferentes, sempre a
+linha 0, nunca as demais. Tentativa de correção via
+`ImGui::TableSetupScrollFreeze(0, 1)` (hipótese: linha 0 compartilhando
+região de scroll com o cabeçalho) foi testada e **revertida** — não
+resolveu o problema. Causa raiz ainda não identificada; não reintroduzir
+essa mesma tentativa sem antes confirmar visualmente que ela funciona.
 
 **Categorias reversíveis vs. permanentes** (`IsPermanentCategory` em
 `ScanItem.h`): temp, cache, duplicados, logs e dados órfãos vão para a

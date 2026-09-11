@@ -14,3 +14,9 @@ CMakeCache.txt
 *.exe
 *.pdb
 *.ilk
+
+# Estado de layout do Dear ImGui (gerado em runtime, nao e' fonte)
+imgui.ini
+
+# Configuracoes pessoais do Claude Code (nao commitar)
+.claude/settings.local.json

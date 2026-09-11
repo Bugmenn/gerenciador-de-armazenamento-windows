@@ -1,4 +1,5 @@
 #include "Panels.h"
+#include "Theme.h"
 #include "storagecleaner/Utils.h"
 
 #include <imgui.h>
@@ -28,12 +29,15 @@ void DrawDashboardPanel(UiState& state) {
         if (ImGui::Button("Cancelar")) state.scanEngine.RequestCancel();
 
         ProgressSnapshot snapshot = state.scanProgress.Read();
-        ImGui::ProgressBar(snapshot.fractionComplete);
+        DrawInlineCircularGauge(28.0f, 6.0f, snapshot.fractionComplete,
+                               ImGui::ColorConvertFloat4ToU32(theme::kAccentBlue),
+                               ImGui::ColorConvertFloat4ToU32(theme::kAccentGold),
+                               ImGui::ColorConvertFloat4ToU32(theme::kBorder));
         ImGui::TextUnformatted(PhaseLabel(snapshot.phase));
         ImGui::TextWrapped("%s", util::WideToUtf8(snapshot.currentItem).c_str());
         ImGui::Text("Itens processados: %llu", static_cast<unsigned long long>(snapshot.itemsProcessed));
         ImGui::Text("Encontrado ate agora: %s", util::FormatSize(snapshot.bytesFoundSoFar).c_str());
-        if (!snapshot.lastError.empty()) ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", snapshot.lastError.c_str());
+        if (!snapshot.lastError.empty()) ImGui::TextColored(theme::kWarning, "%s", snapshot.lastError.c_str());
     } else if (state.hasScanResult) {
         ImGui::Text("Ultima varredura: %s no total", util::FormatSize(state.lastScanResult.GrandTotalBytes()).c_str());
         ImGui::TextUnformatted("Veja a aba Resultados para revisar e limpar.");

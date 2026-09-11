@@ -1,8 +1,10 @@
 #include "App.h"
 #include "Panels.h"
+#include "Theme.h"
 #include "TrayIcon.h"
 #include "UiState.h"
 #include "storagecleaner/ConfigStore.h"
+#include "storagecleaner/Utils.h"
 
 #include "resource.h"
 
@@ -187,6 +189,10 @@ int RunApp(bool startMinimized) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+    ApplyTheme();
+    // Fontes precisam existir no atlas antes do upload de textura em
+    // ImGui_ImplDX11_Init logo abaixo.
+    LoadFonts(io, state.fonts);
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
@@ -228,6 +234,17 @@ int RunApp(bool startMinimized) {
                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                          ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
+        ImGui::PushFont(state.fonts.hero);
+        ImGui::TextUnformatted("Otimizador de Armazenamento");
+        ImGui::PopFont();
+        {
+            LightScanTotals headerTotals = state.GetLightTotals();
+            std::uint64_t detectable = headerTotals.recycleBinBytes + headerTotals.tempBytes;
+            ImGui::TextColored(theme::kTextMuted, "Espaco detectavel agora: %s",
+                               util::FormatSize(detectable).c_str());
+        }
+        ImGui::Separator();
+
         if (ImGui::BeginTabBar("MainTabs")) {
             if (ImGui::BeginTabItem("Dashboard")) {
                 DrawDashboardPanel(state);
@@ -250,7 +267,7 @@ int RunApp(bool startMinimized) {
         ImGui::End();
 
         ImGui::Render();
-        const float clearColor[4] = {0.08f, 0.08f, 0.09f, 1.0f};
+        const float clearColor[4] = {theme::kBg.x, theme::kBg.y, theme::kBg.z, theme::kBg.w};
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clearColor);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

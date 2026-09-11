@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Theme.h"
 #include "storagecleaner/Cleaner.h"
 #include "storagecleaner/Config.h"
 #include "storagecleaner/HistoryEntry.h"
@@ -62,6 +63,9 @@ struct UiState {
     std::chrono::system_clock::time_point lastAutoCleanCheck{};
     bool windowVisible = true;
     bool requestExit = false;
+    // Populado uma unica vez em RunApp() (App.cpp) via Theme::LoadFonts(),
+    // depois de ImGui::CreateContext() — os paineis so leem, nunca escrevem.
+    AppFonts fonts;
     // true enquanto a varredura em andamento (ou a última concluída, até o
     // usuário agir) foi disparada pelo agendador de limpeza automática, e não
     // por um clique manual em "Escanear" — usado tanto para decidir se limpa
