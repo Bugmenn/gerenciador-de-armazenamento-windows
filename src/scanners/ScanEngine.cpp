@@ -25,7 +25,6 @@ void ScanEngine::RunAsync(const Config& config, ProgressChannel& progress) {
     if (worker_.joinable()) worker_.join(); // execução anterior já terminada
     running_.store(true);
     cancelRequested_.store(false);
-    progress.ResetCancel();
 
     worker_ = std::thread([this, config, &progress]() {
         ScanResult result;
@@ -70,6 +69,13 @@ void ScanEngine::RunAsync(const Config& config, ProgressChannel& progress) {
 
 void ScanEngine::RequestCancel() { cancelRequested_.store(true); }
 
+void ScanEngine::StopAndWait() {
+    if (worker_.joinable()) {
+        cancelRequested_.store(true);
+        worker_.join();
+    }
+}
+
 bool ScanEngine::TryTakeResult(ScanResult& out) {
     std::lock_guard<std::mutex> lock(resultMutex_);
     if (!result_.has_value()) return false;
@@ -78,14 +84,9 @@ bool ScanEngine::TryTakeResult(ScanResult& out) {
     return true;
 }
 
-ScanEngine::~ScanEngine() {
-    if (worker_.joinable()) {
-        cancelRequested_.store(true);
-        worker_.join();
-    }
-}
+ScanEngine::~ScanEngine() { StopAndWait(); }
 
-LightScanTotals RunLightBackgroundScan(const Config&) {
+LightScanTotals RunLightBackgroundScan() {
     // Varredura leve: só tamanhos agregados já conhecidos por chamadas O(1)
     // (Lixeira) ou baratas (soma do diretório de temp do usuário atual), sem
     // hash de duplicados nem varredura de todos os perfis — mantém o

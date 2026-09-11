@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -49,14 +48,9 @@ public:
         return snapshot_;
     }
 
-    void RequestCancel() { cancelRequested_.store(true); }
-    bool CancelRequested() const { return cancelRequested_.load(); }
-    void ResetCancel() { cancelRequested_.store(false); }
-
 private:
     mutable std::mutex mutex_;
     ProgressSnapshot snapshot_;
-    std::atomic<bool> cancelRequested_{false};
 };
 
 } // namespace storagecleaner

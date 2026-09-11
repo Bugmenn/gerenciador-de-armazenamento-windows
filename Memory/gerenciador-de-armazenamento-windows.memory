@@ -57,6 +57,23 @@
 
 ## Registro de Atividades Recentes
 
+### [2026-09-10] Revisão de código (arquitetura-projeto, otimizacao-codigo, code-review) e correções
+**O que foi feito:** Revisão da PR #1 usando as skills `arquitetura-projeto` e `otimizacao-codigo` e a skill builtin `code-review` (o subagente `revisor-codigo` não está disponível como `subagent_type` nesta sessão — agentes custom de `.claude/agents/` não são auto-registrados como tipos de agente aqui). Achados e correções aplicadas:
+- **Use-after-free ao sair durante scan em andamento**: `~UiState()` só dava join na `cleanThread`; `ScanEngine` ganhou `StopAndWait()` (público, idempotente) chamado explicitamente no destrutor de `UiState`, em vez de depender da ordem de destruição de membros.
+- **Varredura leve travava a UI thread**: `RunLightBackgroundScan` (Shell API + soma recursiva de `%TEMP%`) era chamada direto em `Tick()`. Agora roda em worker thread própria (`lightScanThread`), com `lightTotals` protegido por mutex e lido via `GetLightTotals()`. Também removeu o parâmetro `Config` (não usado, evitava race com edição concorrente nas Configurações) e passou a clampar `backgroundScanIntervalMinutes` a um mínimo de 5 min (no `SettingsPanel` e de novo em `Tick`).
+- **`autoCleanTimeOfDay` era ignorado**: `ShouldRunAutoClean` agora só considera elegível depois que o horário configurado (HH:MM) já passou no dia, via `IsPastConfiguredTimeOfDay`.
+- **Bytes liberados podiam ser reportados errado**: `Cleaner.cpp` agora registra um `IFileOperationProgressSink` (`DeleteProgressSink`) para saber por item se a remoção realmente aconteceu, em vez de assumir sucesso total quando `PerformOperations()` retorna OK.
+- **Histórico sem cap de entradas**: `HistoryStore::AppendHistoryEntry` agora mantém no máximo 500 execuções (`kMaxHistoryEntries`), descartando as mais antigas.
+- **API morta removida**: `ProgressChannel::RequestCancel/CancelRequested/ResetCancel` nunca eram lidos (cancelamento real é via `std::atomic<bool>&` separado) — removidos.
+**Arquivos alterados:**
+- `include/storagecleaner/ProgressState.h` — remove API de cancelamento morta
+- `include/storagecleaner/Scanner.h` — `ScanEngine::StopAndWait()`, `RunLightBackgroundScan()` sem parâmetro
+- `src/scanners/ScanEngine.cpp` — implementa `StopAndWait`, destrutor usa ele
+- `src/cleaner/Cleaner.cpp` — `DeleteProgressSink`, contagem exata de bytes liberados
+- `src/HistoryStore.cpp` — cap de 500 entradas
+- `src/ui/UiState.h`/`UiState.cpp` — thread própria para varredura leve, destrutor para o scan antes de destruir membros, `IsPastConfiguredTimeOfDay`
+- `src/ui/DashboardPanel.cpp`, `src/ui/SettingsPanel.cpp` — usam `GetLightTotals()`/clamp do intervalo
+
 ### [2026-09-10] Criação inicial do projeto
 **O que foi feito:** Implementado o app completo (scanners, cleaner, UI Dear ImGui, persistência JSON, agendamento de limpeza automática, bandeja/auto-início) e trazidos os arquivos pessoais de configuração do Claude Code (skills/agentes de `github.com/Bugmenn/claude`) para este repositório, junto com `CLAUDE.md` e `Memory/`.
 **Arquivos alterados:**
@@ -81,3 +98,7 @@
 - `src/main.cpp` — mutex de instância única
 - `CMakeLists.txt` — link de `oleaut32` (para `VarDateFromStr`)
 **Pitfall novo:** simplificações de código (reduzir número de estruturas auxiliares, mesclar condicionais) merecem o mesmo nível de revisão que a correção original — duas das regressões desta rodada vieram de simplificações aplicadas depois do fix funcionar corretamente.
+
+### [2026-09-10] Merge de correções concorrentes de outra sessão
+**O que foi feito:** Ao dar push, a branch remota já tinha um commit de outra sessão (`f25acf9`, entrada "Revisão de código (arquitetura-projeto, otimizacao-codigo, code-review) e correções" acima) resolvendo problemas sobrepostos com abordagens diferentes das minhas. Fiz merge git preferindo a versão remota nos pontos sobrepostos (mais completa/robusta: `ScanEngine::StopAndWait()` explícito em vez de depender de ordem de destruição, `IFileOperationProgressSink` real em vez de contagem conservadora), mantendo minhas correções exclusivas (PATH hijacking, ordenação de shadow copies, `SanitizeConfig`, mutex de instância única). Reconciliei `entry.itemsSkipped` (meu campo, que a outra sessão não tinha) para também refletir a contagem precisa por item deles. Unifiquei o mínimo de `backgroundScanIntervalMinutes` para 5 (valor deles, já que a varredura leve agora roda em thread própria) mantendo centralizado em `SanitizeConfig` (minha arquitetura).
+**Pitfall novo:** duas sessões do Claude Code trabalhando na mesma branch remota ao mesmo tempo podem corrigir os mesmos problemas de formas incompatíveis — sempre fazer `git fetch`/checar o remoto antes de dar push numa branch que pode estar sendo usada por outra sessão (cloud ou local).

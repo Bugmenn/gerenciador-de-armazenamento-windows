@@ -3,6 +3,8 @@
 #include "storagecleaner/HistoryStore.h"
 #include "storagecleaner/Utils.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <ctime>
 
 namespace storagecleaner::ui {
@@ -23,11 +25,26 @@ int FrequencyToHours(AutoCleanFrequency freq) {
     return 24 * 7;
 }
 
+// Só passa a ser elegível depois que o horário configurado (HH:MM, hora
+// local) já tiver passado no dia atual — sem essa checagem, "todo dia às
+// 03:00" disparava a qualquer hora em que o app estivesse aberto (o campo
+// `autoCleanTimeOfDay` era lido/gravado na config mas nunca consultado aqui).
+bool IsPastConfiguredTimeOfDay(const std::string& hhmm) {
+    int hour = 0, minute = 0;
+    if (std::sscanf(hhmm.c_str(), "%d:%d", &hour, &minute) != 2) return true; // config inválida: não bloqueia
+
+    std::time_t now = std::time(nullptr);
+    std::tm nowTm{};
+    localtime_s(&nowTm, &now);
+    return (nowTm.tm_hour > hour) || (nowTm.tm_hour == hour && nowTm.tm_min >= minute);
+}
+
 bool ShouldRunAutoClean(const Config& config) {
     if (!config.autoCleanEnabled) return false;
+    if (!IsPastConfiguredTimeOfDay(config.autoCleanTimeOfDay)) return false;
 
     auto last = LastAutoCleanTimestamp();
-    if (!last.has_value()) return true; // nunca rodou: dispara na primeira checagem
+    if (!last.has_value()) return true; // nunca rodou: dispara na primeira checagem apos o horario
 
     auto elapsedHours =
         std::chrono::duration_cast<std::chrono::hours>(std::chrono::system_clock::now() - *last)
@@ -54,7 +71,6 @@ void UiState::StartClean(const std::vector<ScanItem>& selected, bool automatic) 
     }
     cleaning.store(true);
     cleanCancel.store(false);
-    cleanProgress.ResetCancel();
 
     if (cleanThread.joinable()) cleanThread.join();
 
@@ -132,14 +148,30 @@ void UiState::Tick() {
         }
     }
 
-    // Varredura leve periódica em segundo plano.
+    // Varredura leve periódica em segundo plano — roda em worker thread
+    // própria (nunca direto aqui em Tick(), que é a UI thread): apesar do
+    // nome "leve", ainda faz uma chamada Shell e uma varredura recursiva de
+    // %TEMP%, e rodar isso na thread de renderização travaria a UI a cada
+    // intervalo. O intervalo é sempre clampado a um mínimo (5 min) mesmo que
+    // o usuário configure um valor menor/zero/negativo nas Configurações.
     auto now = std::chrono::steady_clock::now();
     auto sinceLast =
         std::chrono::duration_cast<std::chrono::minutes>(now - lastLightScan).count();
-    if (lastLightScan.time_since_epoch().count() == 0 ||
-        sinceLast >= config.backgroundScanIntervalMinutes) {
-        lightTotals = RunLightBackgroundScan(config);
+    int intervalMinutes = std::max(config.backgroundScanIntervalMinutes, 5);
+    if (!lightScanInProgress.load() &&
+        (lastLightScan.time_since_epoch().count() == 0 || sinceLast >= intervalMinutes)) {
         lastLightScan = now;
+        lightScanInProgress.store(true);
+        if (lightScanThread.joinable()) lightScanThread.join();
+
+        lightScanThread = std::thread([this]() {
+            LightScanTotals totals = RunLightBackgroundScan();
+            {
+                std::lock_guard<std::mutex> lock(lightScanMutex);
+                lightTotals = totals;
+            }
+            lightScanInProgress.store(false);
+        });
     }
 
     // Timer do auto-clean: checa no máximo uma vez por minuto se está na hora.

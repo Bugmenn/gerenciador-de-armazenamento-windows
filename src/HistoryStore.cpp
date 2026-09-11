@@ -131,8 +131,15 @@ void AppendHistoryEntry(const HistoryEntry& entry) {
         capped.items.resize(HistoryEntry::kMaxItemsPerEntry);
     entries.push_back(capped);
 
-    if (entries.size() > HistoryEntry::kMaxEntries)
-        entries.erase(entries.begin(), entries.end() - HistoryEntry::kMaxEntries);
+    // Sem isso, history.json cresce para sempre — cada limpeza (mesmo as
+    // automáticas diárias) reescreve o arquivo inteiro, então sem um teto no
+    // NÚMERO de execuções (o kMaxItemsPerEntry só limita os itens dentro de
+    // uma execução) o custo por limpeza cresce indefinidamente ao longo dos
+    // meses/anos de uso. Mantém sempre as mais recentes.
+    if (entries.size() > HistoryEntry::kMaxEntries) {
+        entries.erase(entries.begin(),
+                      entries.end() - static_cast<std::ptrdiff_t>(HistoryEntry::kMaxEntries));
+    }
 
     json arr = json::array();
     for (const auto& e : entries) arr.push_back(ToJson(e));

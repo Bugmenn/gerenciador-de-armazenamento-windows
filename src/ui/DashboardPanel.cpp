@@ -41,8 +41,9 @@ void DrawDashboardPanel(UiState& state) {
 
     ImGui::Separator();
     ImGui::TextUnformatted("Varredura leve em segundo plano (atualizada automaticamente):");
-    ImGui::Text("Lixeira: %s", util::FormatSize(state.lightTotals.recycleBinBytes).c_str());
-    ImGui::Text("Temporarios (usuario atual): %s", util::FormatSize(state.lightTotals.tempBytes).c_str());
+    LightScanTotals lightTotals = state.GetLightTotals();
+    ImGui::Text("Lixeira: %s", util::FormatSize(lightTotals.recycleBinBytes).c_str());
+    ImGui::Text("Temporarios (usuario atual): %s", util::FormatSize(lightTotals.tempBytes).c_str());
 }
 
 } // namespace storagecleaner::ui

@@ -31,7 +31,10 @@ struct LightScanTotals {
     std::uint64_t tempBytes = 0;
     std::uint64_t recycleBinBytes = 0;
 };
-LightScanTotals RunLightBackgroundScan(const Config&);
+// Não recebe Config: não usa nenhum campo dela hoje, e evita que a worker
+// thread da varredura leve precise ler um Config que a UI thread pode estar
+// editando ao mesmo tempo nas Configurações (ver UiState::Tick).
+LightScanTotals RunLightBackgroundScan();
 
 class ScanEngine {
 public:
@@ -45,6 +48,14 @@ public:
     // Não bloqueante: true e move o resultado para `out` se uma execução
     // tiver terminado desde a última chamada.
     bool TryTakeResult(ScanResult& out);
+
+    // Pede cancelamento e bloqueia até a worker thread realmente terminar.
+    // Chamado explicitamente por quem possui este ScanEngine (ver UiState)
+    // ANTES de qualquer ProgressChannel referenciado pela worker ser
+    // destruído — depender só da ordem de destruição dos membros seria
+    // frágil a mudanças futuras na struct dona. Idempotente/seguro chamar
+    // mais de uma vez (inclusive pelo destrutor).
+    void StopAndWait();
 
     ~ScanEngine();
 

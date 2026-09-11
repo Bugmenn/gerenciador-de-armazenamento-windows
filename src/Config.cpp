@@ -21,9 +21,10 @@ void SanitizeConfig(Config& config) {
     if (config.oldLogsThresholdDays < 0) config.oldLogsThresholdDays = 0;
     if (config.restorePointsToKeep < 0) config.restorePointsToKeep = 0;
     if (config.orphanedAppsInactivityDays < 0) config.orphanedAppsInactivityDays = 0;
-    // Minimo 1: um valor <= 0 faria RunLightBackgroundScan (I/O sincrono de
-    // varredura de disco) disparar a cada Tick() da UI, travando a interface.
-    if (config.backgroundScanIntervalMinutes < 1) config.backgroundScanIntervalMinutes = 1;
+    // Minimo 5: a varredura leve roda em worker thread propria mas ainda faz
+    // I/O real (Shell API + soma recursiva de %TEMP%), entao um intervalo
+    // muito baixo faria essa thread disparar quase sem parar.
+    if (config.backgroundScanIntervalMinutes < 5) config.backgroundScanIntervalMinutes = 5;
 }
 
 const char* AutoCleanFrequencyName(AutoCleanFrequency f) {
