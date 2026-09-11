@@ -57,6 +57,18 @@
 
 ## Registro de Atividades Recentes
 
+### [2026-09-11] Correção dos 3 achados da revisão total (usuário pediu para arrumar tudo)
+**O que foi feito:**
+- **`Advise()` falhando zerava bytes liberados** (`Cleaner.cpp::SendToRecycleBin`): quando `advised == false`, agora usa o resultado agregado de `PerformOperations()` (`ok`) como aproximação por item, em vez de assumir falha total — preserva o comportamento pré-sink só nesse caso de borda raro.
+- **`RegEnumKeyExW` truncava enumeração em `ERROR_MORE_DATA`** (`OrphanedAppDataScanner.cpp::CollectInstalledAppNames`): só interrompe o laço em `ERROR_NO_MORE_ITEMS`; qualquer outro erro (inclusive `ERROR_MORE_DATA`) agora só pula aquela entrada e continua. Também corrigido `RegQueryValueExW` para sempre garantir terminador nulo no buffer de `DisplayName` (reserva 1 wchar de folga e escreve `\0` na posição calculada a partir do `size` retornado).
+- **`DirectorySize` duplicava iteração e ignorava `cancel`**: reimplementada em cima de `ForEachFileRecursive` (mesma lógica de `ComputeDirectoryStats`, sem reimplementar `recursive_directory_iterator`), agora recebe `std::atomic<bool>& cancel`. `BrowserCacheScanner` passa o `cancel` real (antes ignorado); a varredura leve em segundo plano passa um atomic local sempre-false (não tem cancelamento real acionável pelo usuário).
+**Arquivos alterados:**
+- `src/cleaner/Cleaner.cpp` — fallback de `succeededPerItem` quando `Advise()` falha
+- `src/scanners/OrphanedAppDataScanner.cpp` — `continue` em vez de `break` no laço de registro, terminador nulo garantido
+- `include/storagecleaner/Utils.h`, `src/Utils.cpp` — `DirectorySize` ganha parâmetro `cancel`, implementada via `ForEachFileRecursive`
+- `src/scanners/BrowserCacheScanner.cpp` — repassa `cancel` real para `DirectorySize`
+- `src/scanners/ScanEngine.cpp` — varredura leve passa atomic local sempre-false
+
 ### [2026-09-11] Revisão total do projeto (arquitetura-projeto, otimizacao-codigo, code-review, revisor-codigo)
 **O que foi feito:** Revisão completa de `include/storagecleaner/` e `src/` no estado atual da `main` (pós-merge da PR #1 + 2 rodadas de outra sessão), usando as 4 ferramentas pedidas (desta vez `revisor-codigo` estava disponível como `subagent_type`). Convergência forte entre `code-review` e `revisor-codigo` em 2 achados que já constavam nesta memória (linhas acima, [2026-09-11] anterior) e seguem **sem correção**: `Advise()` falhando em `SendToRecycleBin` zera indevidamente os bytes liberados do lote; `RegEnumKeyExW` em `CollectInstalledAppNames` trunca a enumeração em `ERROR_MORE_DATA`. Achado novo (otimização, meu): `util::DirectorySize` duplica a mesma iteração de `ForEachFileRecursive`/`ComputeDirectoryStats` e, ao contrário deles, não observa `cancel` — usada em `BrowserCacheScanner` (que tem `cancel` disponível mas não o repassa) e na varredura leve. Arquitetura: sem problemas novos; abstrações da rodada anterior (`ForEachFileRecursive`, `ComputeDirectoryStats`, `SanitizeConfig`, `SelectionSummary`) bem integradas, direção de dependências (`ui` → `scanners`/`cleaner` → `include/storagecleaner`) continua correta.
 **Arquivos alterados:** nenhum (revisão apenas; aguardando decisão do usuário sobre aplicar os fixes).

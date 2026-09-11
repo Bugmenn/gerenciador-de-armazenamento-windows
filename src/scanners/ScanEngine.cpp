@@ -94,8 +94,14 @@ LightScanTotals RunLightBackgroundScan() {
     LightScanTotals totals;
     totals.recycleBinBytes = QueryRecycleBinSizeBytes();
 
-    if (wchar_t tempPath[MAX_PATH]; ::GetTempPathW(MAX_PATH, tempPath) > 0)
-        totals.tempBytes = util::DirectorySize(tempPath);
+    if (wchar_t tempPath[MAX_PATH]; ::GetTempPathW(MAX_PATH, tempPath) > 0) {
+        // A varredura leve não tem um cancelamento real acionável pelo
+        // usuário (roda sozinha em segundo plano) — usa um atomic local
+        // sempre false só para satisfazer a assinatura compartilhada com as
+        // demais varreduras.
+        std::atomic<bool> noCancel{false};
+        totals.tempBytes = util::DirectorySize(tempPath, noCancel);
+    }
 
     return totals;
 }

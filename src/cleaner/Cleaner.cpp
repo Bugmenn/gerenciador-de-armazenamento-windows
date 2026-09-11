@@ -134,8 +134,17 @@ bool SendToRecycleBin(const std::vector<ScanItem>& items, std::vector<bool>& suc
 
     if (advised) fileOp->Unadvise(adviseCookie);
 
-    for (std::size_t i = 0; i < queuedOriginalIndex.size() && i < sink->succeeded.size(); ++i)
-        succeededPerItem[queuedOriginalIndex[i]] = sink->succeeded[i];
+    if (advised) {
+        for (std::size_t i = 0; i < queuedOriginalIndex.size() && i < sink->succeeded.size(); ++i)
+            succeededPerItem[queuedOriginalIndex[i]] = sink->succeeded[i];
+    } else {
+        // Sem Advise() bem-sucedido não há como saber por item (o sink nunca
+        // recebeu PostDeleteItem nenhum) — cair para "todos falharam" aqui
+        // subestimaria bytes liberados numa limpeza que na prática funcionou.
+        // Usa o resultado agregado de PerformOperations() como aproximação,
+        // igual ao comportamento antes do sink existir.
+        for (std::size_t idx : queuedOriginalIndex) succeededPerItem[idx] = ok;
+    }
 
     sink->Release();
     return ok;

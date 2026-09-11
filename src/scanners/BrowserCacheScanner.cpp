@@ -14,11 +14,15 @@ namespace {
 // cache do Chrome" ou não — listar arquivo a arquivo só poluiria a tabela de
 // resultados sem agregar valor.
 void AddCacheDirIfExists(const fs::path& dir, std::vector<ScanItem>& out,
-                         ProgressSnapshot& snapshot, ProgressChannel& progress) {
+                         ProgressSnapshot& snapshot, ProgressChannel& progress,
+                         std::atomic<bool>& cancel) {
     std::error_code ec;
     if (!fs::is_directory(dir, ec) || ec) return;
 
-    std::uint64_t size = util::DirectorySize(dir.wstring());
+    // Passa `cancel` adiante: sem isso, um cache de navegador grande (o do
+    // Chrome facilmente chega a alguns GB) fazia o "Cancelar" da UI não
+    // surtir efeito até essa pasta inteira terminar de ser somada.
+    std::uint64_t size = util::DirectorySize(dir.wstring(), cancel);
     if (size == 0) return;
 
     out.push_back(ScanItem{dir.wstring(), size, Category::BrowserCache, L"", true});
@@ -46,8 +50,8 @@ void ScanProfileCaches(const fs::path& profileDir, std::vector<ScanItem>& out,
             std::error_code entryEc;
             if (!entry.is_directory(entryEc) || entryEc) continue;
 
-            AddCacheDirIfExists(entry.path() / L"Cache", out, snapshot, progress);
-            AddCacheDirIfExists(entry.path() / L"Code Cache", out, snapshot, progress);
+            AddCacheDirIfExists(entry.path() / L"Cache", out, snapshot, progress, cancel);
+            AddCacheDirIfExists(entry.path() / L"Code Cache", out, snapshot, progress, cancel);
         }
     }
 
@@ -60,7 +64,7 @@ void ScanProfileCaches(const fs::path& profileDir, std::vector<ScanItem>& out,
             if (cancel.load()) return;
             std::error_code entryEc;
             if (!entry.is_directory(entryEc) || entryEc) continue;
-            AddCacheDirIfExists(entry.path() / L"cache2", out, snapshot, progress);
+            AddCacheDirIfExists(entry.path() / L"cache2", out, snapshot, progress, cancel);
         }
     }
 }

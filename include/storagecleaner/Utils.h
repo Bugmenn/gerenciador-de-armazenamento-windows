@@ -31,7 +31,11 @@ bool IsOlderThanDays(const std::wstring& path, int days);
 
 // Soma recursivamente o tamanho de todos os arquivos sob `dir`. Usado para
 // dimensionar pastas inteiras (ex: cache de navegador) como um único item.
-std::uint64_t DirectorySize(const std::wstring& dir);
+// Implementada em cima de ForEachFileRecursive (não reimplementa a iteração)
+// e por isso observa `cancel` como as demais varreduras — chamador sem um
+// atomic de cancelamento real (ex.: varredura leve em segundo plano) pode
+// passar um `std::atomic<bool>` local sempre false.
+std::uint64_t DirectorySize(const std::wstring& dir, std::atomic<bool>& cancel);
 
 struct DirectoryStats {
     std::uint64_t totalBytes = 0;

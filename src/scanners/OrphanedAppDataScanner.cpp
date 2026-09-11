@@ -60,19 +60,33 @@ std::vector<std::wstring> CollectInstalledAppNames() {
         for (DWORD i = 0;; ++i) {
             wchar_t subKeyName[256];
             DWORD subKeyLen = 256;
-            if (::RegEnumKeyExW(key, i, subKeyName, &subKeyLen, nullptr, nullptr, nullptr,
-                                 nullptr) != ERROR_SUCCESS)
-                break;
+            LSTATUS enumStatus = ::RegEnumKeyExW(key, i, subKeyName, &subKeyLen, nullptr, nullptr,
+                                                 nullptr, nullptr);
+            if (enumStatus == ERROR_NO_MORE_ITEMS) break;
+            if (enumStatus != ERROR_SUCCESS) {
+                // ERROR_MORE_DATA (nome de subchave > 255 chars, raro mas
+                // existe) não significa "acabou a lista" — só essa entrada não
+                // coube no buffer. Dar break aqui pararia de enumerar TODO o
+                // resto do hive, tratando apps genuinamente instalados (cujas
+                // subchaves viriam depois) como não instalados. Pula só esta
+                // entrada e continua.
+                continue;
+            }
 
             HKEY appKey = nullptr;
             if (::RegOpenKeyExW(key, subKeyName, 0, KEY_READ, &appKey) != ERROR_SUCCESS) continue;
 
             wchar_t displayName[512];
-            DWORD size = sizeof(displayName);
+            // -1 para sempre sobrar espaço de garantir o terminador nulo
+            // abaixo: RegQueryValueExW não garante \0 quando o valor REG_SZ
+            // preenche o buffer exatamente (pitfall documentado da API).
+            DWORD size = sizeof(displayName) - sizeof(wchar_t);
             DWORD type = 0;
             if (::RegQueryValueExW(appKey, L"DisplayName", nullptr, &type,
                                     reinterpret_cast<BYTE*>(displayName), &size) == ERROR_SUCCESS &&
                 type == REG_SZ) {
+                std::size_t lenInChars = size / sizeof(wchar_t);
+                displayName[lenInChars] = L'\0';
                 names.emplace_back(displayName);
             }
             ::RegCloseKey(appKey);

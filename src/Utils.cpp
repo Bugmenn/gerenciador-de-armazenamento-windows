@@ -116,19 +116,10 @@ bool IsOlderThanDays(const std::wstring& path, int days) {
     return IsOlderThanHours(path, days * 24);
 }
 
-std::uint64_t DirectorySize(const std::wstring& dir) {
+std::uint64_t DirectorySize(const std::wstring& dir, std::atomic<bool>& cancel) {
     std::uint64_t total = 0;
-    std::error_code ec;
-    fs::recursive_directory_iterator it(
-        dir, fs::directory_options::skip_permission_denied, ec);
-    fs::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        std::error_code fileEc;
-        if (it->is_regular_file(fileEc) && !fileEc) {
-            auto size = it->file_size(fileEc);
-            if (!fileEc) total += size;
-        }
-    }
+    ForEachFileRecursive(dir, cancel,
+                        [&total](const std::wstring&, std::uint64_t size) { total += size; });
     return total;
 }
 
