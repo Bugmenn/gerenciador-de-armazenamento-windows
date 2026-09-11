@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -129,6 +130,7 @@ std::uint64_t DirectorySize(const std::wstring& dir) {
 
 CommandResult RunCommandCaptureOutput(const std::wstring& commandLine) {
     CommandResult result;
+    constexpr DWORD kHangTimeoutMs = 60000; // vssadmin nunca deveria levar perto disso
 
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
@@ -164,6 +166,18 @@ CommandResult RunCommandCaptureOutput(const std::wstring& commandLine) {
         return result;
     }
 
+    // Watchdog: se o processo travar (ex.: servico VSS ocupado), forca o
+    // encerramento apos o timeout fixo abaixo em vez de bloquear esta thread
+    // para sempre. Isso evita um hang permanente, mas NAO torna o
+    // cancelamento do usuario instantaneo: se o cancelamento acontecer
+    // durante a janela do timeout, ainda esperamos ate kHangTimeoutMs (ou o
+    // termino natural do processo) antes de retomar.
+    HANDLE processHandle = pi.hProcess;
+    std::thread watchdog([processHandle, kHangTimeoutMs]() {
+        if (::WaitForSingleObject(processHandle, kHangTimeoutMs) == WAIT_TIMEOUT)
+            ::TerminateProcess(processHandle, 1);
+    });
+
     std::string output;
     char buf[4096];
     DWORD bytesRead = 0;
@@ -173,6 +187,7 @@ CommandResult RunCommandCaptureOutput(const std::wstring& commandLine) {
     ::CloseHandle(readPipe);
 
     ::WaitForSingleObject(pi.hProcess, INFINITE);
+    watchdog.join();
     DWORD exitCode = 0;
     ::GetExitCodeProcess(pi.hProcess, &exitCode);
     ::CloseHandle(pi.hProcess);
@@ -191,6 +206,21 @@ std::wstring KnownFolderPath(const GUID& folderId) {
         ::CoTaskMemFree(rawPath);
     }
     return result;
+}
+
+std::wstring SystemToolPath(const wchar_t* toolName) {
+    wchar_t sysDir[MAX_PATH];
+    UINT len = ::GetSystemDirectoryW(sysDir, MAX_PATH);
+    // Falha aqui e' improvavel, mas jamais cair para o nome sem caminho: isso
+    // reabriria a busca por PATH que esta funcao existe para evitar. O
+    // chamador deve tratar string vazia como falha e nao executar o comando.
+    if (len == 0 || len >= MAX_PATH) return L"";
+
+    // Aspas para o caso (improvavel, mas nao impossivel) de o diretorio do
+    // sistema conter espacos — CreateProcessW trata o primeiro token da
+    // linha de comando como o executavel, entao precisa estar bem delimitado.
+    std::wstring path = L"\"" + std::wstring(sysDir) + L"\\" + toolName + L".exe\"";
+    return path;
 }
 
 std::vector<std::wstring> EnumerateUserProfileDirs() {

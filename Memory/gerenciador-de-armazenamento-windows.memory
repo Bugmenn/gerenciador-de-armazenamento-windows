@@ -65,3 +65,19 @@
 - `CMakeLists.txt`, `tests/` *(novo)*
 - `.claude/agents/*.md`, `.claude/skills/*` *(novo)* — copiados de Bugmenn/claude
 - `CLAUDE.md`, `Memory/diretrizes.md`, `Memory/gerenciador-de-armazenamento-windows.memory` *(novo)*
+
+### [2026-09-10] Rodadas de revisão de código e correções de segurança/robustez
+**O que foi feito:** Três rodadas de revisão (`/code-review`, `revisor-codigo`, `/arquitetura-projeto`, `/otimizacao-codigo`) sobre o app inicial, com correções aplicadas a cada rodada. Rodada 1 (segurança): fechado PATH hijacking do `vssadmin` (`SystemToolPath` resolve por caminho absoluto em `System32`), watchdog com timeout de 60s em `RunCommandCaptureOutput` (evita hang indefinido), ordenação explícita de shadow copies por `creationTime` (via `VarDateFromStr`) em vez de confiar na ordem de saída do `vssadmin`, clamps de config, mutex de instância única (`Local\StorageCleanerSingleInstance`), campo `HistoryEntry::itemsSkipped`. Rodada 2 (atenção/sugestão pós-fix): fallback inseguro de `SystemToolPath` fechado (não cai mais para o nome sem caminho), clamps de `Config` centralizados em `SanitizeConfig()` (`Config.h`/`Config.cpp`). Rodada 3 (verificação final): corrigidas 2 regressões introduzidas pela própria simplificação da rodada 2 — `SortByCreationTimeIfPossible` movia entradas de `shadows` antes de confirmar que todas eram parseáveis (corrompia a ordem em caso de parse parcial) e `ContainsAsSubstring` bloqueava correspondência exata para nomes de app com menos de 4 caracteres (ex.: "VLC"), marcando apps instalados como "órfãos"; também corrigido cancelamento de limpeza de restore points não contabilizado em `itemsSkipped`.
+**Arquivos alterados:**
+- `src/Utils.cpp`, `include/storagecleaner/Utils.h` — `SystemToolPath`, watchdog em `RunCommandCaptureOutput`
+- `src/cleaner/VssRestorePoints.cpp` — usa `SystemToolPath`, aborta se resolução falhar
+- `src/scanners/RestorePointsScanner.cpp` — ordenação por `creationTime`, fix de corrupção parcial
+- `src/scanners/OrphanedAppDataScanner.cpp` — `ContainsAsSubstring`, fix de nomes curtos
+- `include/storagecleaner/Config.h`, `src/Config.cpp` — `SanitizeConfig()` centralizado
+- `src/ConfigStore.cpp`, `src/ui/SettingsPanel.cpp` — uso de `SanitizeConfig()`, remoção de `includePaths`/`excludePaths` mortos
+- `include/storagecleaner/HistoryEntry.h`, `src/HistoryStore.cpp`, `src/ui/HistoryPanel.cpp` — `itemsSkipped`, `kMaxEntries`
+- `src/cleaner/Cleaner.cpp` — `itemsSkipped` consistente em todos os caminhos de falha/cancelamento
+- `src/ui/UiState.h` — ordem de destruição `scanProgress`/`scanEngine` (evita use-after-free)
+- `src/main.cpp` — mutex de instância única
+- `CMakeLists.txt` — link de `oleaut32` (para `VarDateFromStr`)
+**Pitfall novo:** simplificações de código (reduzir número de estruturas auxiliares, mesclar condicionais) merecem o mesmo nível de revisão que a correção original — duas das regressões desta rodada vieram de simplificações aplicadas depois do fix funcionar corretamente.

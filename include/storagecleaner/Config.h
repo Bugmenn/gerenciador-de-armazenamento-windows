@@ -26,8 +26,6 @@ enum class AutoCleanMode {
 
 struct CategoryConfig {
     bool enabled = true;
-    std::vector<std::wstring> includePaths;  // raízes adicionais definidas pelo usuário
-    std::vector<std::wstring> excludePaths;  // caminhos a nunca considerar
 };
 
 struct Config {
@@ -58,6 +56,11 @@ struct Config {
 
     static Config Defaults();
 };
+
+// Aplica os limites minimos de Config (chamada apos carregar config.json ou
+// apos qualquer edicao pela UI) — fonte unica para essas invariantes, para
+// nao precisar reimplementar o mesmo clamp em cada ponto de mutacao.
+void SanitizeConfig(Config& config);
 
 const char* AutoCleanFrequencyName(AutoCleanFrequency f);
 const char* AutoCleanModeName(AutoCleanMode m);

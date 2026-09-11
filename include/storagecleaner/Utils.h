@@ -39,6 +39,16 @@ struct CommandResult {
 };
 CommandResult RunCommandCaptureOutput(const std::wstring& commandLine);
 
+// Caminho absoluto para um executavel em System32 (ex.: "vssadmin" ->
+// "C:\Windows\System32\vssadmin.exe"). Usado para montar linhas de comando
+// sem depender da resolucao implicita de PATH do CreateProcessW, que
+// permitiria a um executavel malicioso no PATH do usuario ser executado no
+// lugar da ferramenta do sistema quando o processo estiver elevado.
+// Retorna string vazia em caso de falha (GetSystemDirectoryW) — o chamador
+// deve tratar isso como falha e NAO executar o comando, nunca cair para o
+// nome sem caminho, o que reabriria a busca por PATH.
+std::wstring SystemToolPath(const wchar_t* toolName);
+
 // Wrapper fino sobre SHGetKnownFolderPath; retorna string vazia em falha.
 // O chamador inclui <knownfolders.h> para ter as constantes FOLDERID_*.
 std::wstring KnownFolderPath(const GUID& folderId);

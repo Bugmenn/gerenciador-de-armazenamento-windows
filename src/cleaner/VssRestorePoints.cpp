@@ -26,8 +26,11 @@ std::vector<ShadowCopyInfo> ListShadowCopies() {
     std::vector<ShadowCopyInfo> result;
     if (!IsRunningElevated()) return result;
 
+    std::wstring vssadminPath = util::SystemToolPath(L"vssadmin");
+    if (vssadminPath.empty()) return result; // nao arrisca resolucao via PATH
+
     util::CommandResult cmd =
-        util::RunCommandCaptureOutput(L"vssadmin list shadows /for=C:");
+        util::RunCommandCaptureOutput(vssadminPath + L" list shadows /for=C:");
     if (cmd.exitCode != 0) return result;
 
     // A saída do vssadmin é texto tabular simples e estável (não muda entre
@@ -68,7 +71,10 @@ std::vector<ShadowCopyInfo> ListShadowCopies() {
 bool DeleteShadowCopy(const std::wstring& id) {
     if (!IsRunningElevated()) return false;
 
-    std::wstring commandLine = L"vssadmin delete shadows /shadow=" + id + L" /quiet";
+    std::wstring vssadminPath = util::SystemToolPath(L"vssadmin");
+    if (vssadminPath.empty()) return false; // nao arrisca resolucao via PATH
+
+    std::wstring commandLine = vssadminPath + L" delete shadows /shadow=" + id + L" /quiet";
     util::CommandResult cmd = util::RunCommandCaptureOutput(commandLine);
     return cmd.exitCode == 0;
 }

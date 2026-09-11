@@ -46,18 +46,12 @@ bool CategoryFromKey(const std::string& key, Category& out) {
 json ToJson(const CategoryConfig& cc) {
     json j;
     j["enabled"] = cc.enabled;
-    for (const auto& p : cc.includePaths) j["includePaths"].push_back(util::WideToUtf8(p));
-    for (const auto& p : cc.excludePaths) j["excludePaths"].push_back(util::WideToUtf8(p));
     return j;
 }
 
 CategoryConfig CategoryConfigFromJson(const json& j) {
     CategoryConfig cc;
     cc.enabled = j.value("enabled", true);
-    if (j.contains("includePaths"))
-        for (const auto& p : j["includePaths"]) cc.includePaths.push_back(util::Utf8ToWide(p.get<std::string>()));
-    if (j.contains("excludePaths"))
-        for (const auto& p : j["excludePaths"]) cc.excludePaths.push_back(util::Utf8ToWide(p.get<std::string>()));
     return cc;
 }
 
@@ -119,6 +113,11 @@ Config ConfigFromJson(const json& j) {
     config.autoCleanMode = static_cast<AutoCleanMode>(
         j.value("autoCleanMode", static_cast<int>(config.autoCleanMode)));
     config.autoCleanTimeOfDay = j.value("autoCleanTimeOfDay", config.autoCleanTimeOfDay);
+
+    // Defesa contra config.json editado a mão ou de uma versão incompatível:
+    // valores fora desses limites fariam a varredura em segundo plano rodar
+    // sem parar ou tratariam qualquer arquivo/pasta como "antigo"/"órfão".
+    SanitizeConfig(config);
     return config;
 }
 

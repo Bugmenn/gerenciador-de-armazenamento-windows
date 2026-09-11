@@ -77,6 +77,7 @@ target_link_libraries(StorageCleaner PRIVATE
     d3dcompiler
     shell32
     ole32
+    oleaut32
     bcrypt
     crypt32
     shlwapi

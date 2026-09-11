@@ -26,8 +26,12 @@ struct UiState {
     Config config;
 
     // Varredura sob demanda (aba Dashboard/Resultados).
-    ScanEngine scanEngine;
+    // scanProgress precisa ser declarado antes de scanEngine: a destruição de
+    // membros ocorre na ordem inversa da declaração, e ~ScanEngine() dá join()
+    // na worker thread, que ainda referencia scanProgress enquanto roda — se
+    // scanProgress fosse destruído primeiro, seria use-after-free.
     ProgressChannel scanProgress;
+    ScanEngine scanEngine;
     ScanResult lastScanResult;
     // Um vetor de seleção paralelo a cada bucket de lastScanResult.
     std::vector<std::vector<bool>> selection;

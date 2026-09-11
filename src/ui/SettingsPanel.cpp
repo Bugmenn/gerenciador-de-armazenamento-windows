@@ -25,17 +25,24 @@ void DrawSettingsPanel(UiState& state) {
         if (minSizeKb < 0) minSizeKb = 0;
         config.minFileSizeBytes = static_cast<std::uint64_t>(minSizeKb) * 1024;
     }
-    ImGui::InputInt("Logs mais antigos que (dias)", &config.oldLogsThresholdDays);
-    ImGui::InputInt("Pontos de restauracao a manter", &config.restorePointsToKeep);
-    ImGui::InputInt("Dados orfaos: inativos ha pelo menos (dias)",
-                    &config.orphanedAppsInactivityDays);
+    // SanitizeConfig e' chamada uma unica vez apos os tres campos (em vez de
+    // um `if` por campo) para nao precisar lembrar de repetir a chamada a
+    // cada novo campo clampado que for adicionado aqui no futuro.
+    bool logsChanged = ImGui::InputInt("Logs mais antigos que (dias)", &config.oldLogsThresholdDays);
+    bool restoreChanged =
+        ImGui::InputInt("Pontos de restauracao a manter", &config.restorePointsToKeep);
+    bool orphanChanged = ImGui::InputInt("Dados orfaos: inativos ha pelo menos (dias)",
+                                         &config.orphanedAppsInactivityDays);
+    if (logsChanged || restoreChanged || orphanChanged) SanitizeConfig(config);
 
     ImGui::Separator();
     ImGui::TextUnformatted("Segundo plano");
     if (ImGui::Checkbox("Iniciar com o Windows", &config.startWithWindows))
         SetStartWithWindows(config.startWithWindows);
     ImGui::Checkbox("Minimizar para a bandeja ao fechar", &config.minimizeToTrayOnClose);
-    ImGui::InputInt("Intervalo da varredura leve (minutos)", &config.backgroundScanIntervalMinutes);
+    if (ImGui::InputInt("Intervalo da varredura leve (minutos)",
+                       &config.backgroundScanIntervalMinutes))
+        SanitizeConfig(config);
 
     ImGui::Separator();
     ImGui::TextUnformatted("Limpeza automatica");

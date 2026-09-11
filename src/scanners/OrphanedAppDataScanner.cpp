@@ -100,6 +100,22 @@ std::vector<std::wstring> CollectProgramFilesFolderNames() {
     return names;
 }
 
+// Abaixo desse tamanho um nome normalizado (ex.: "go", "ai") é curto demais
+// para servir como lado "contido" do match por substring — aceitar geraria
+// falsos positivos com pastas completamente não relacionadas.
+constexpr std::size_t kMinSubstringMatchLen = 4;
+
+// true se `needle` aparece dentro de `haystack`. Igualdade exata sempre
+// conta (mesmo para nomes curtos, ex.: "vlc" == "vlc") — o tamanho mínimo só
+// se aplica a uma contenção estrita, para não bloquear o caso mais comum
+// (apps cujo nome de pasta é idêntico ao nome normalizado) junto com os
+// falsos positivos de substring curta que ele existe para evitar.
+bool ContainsAsSubstring(const std::wstring& haystack, const std::wstring& needle) {
+    if (haystack == needle) return true;
+    return needle.size() >= kMinSubstringMatchLen &&
+           haystack.find(needle) != std::wstring::npos;
+}
+
 bool MatchesAnyInstalledApp(const std::wstring& normalizedFolderName,
                             const std::vector<std::wstring>& normalizedKnownNames) {
     for (const auto& known : normalizedKnownNames) {
@@ -107,8 +123,8 @@ bool MatchesAnyInstalledApp(const std::wstring& normalizedFolderName,
         // Substring nos dois sentidos: "steam" deve casar com "valve steam" e
         // vice-versa, já que nomes de pastas raramente são idênticos ao
         // DisplayName completo do instalador.
-        if (normalizedFolderName.find(known) != std::wstring::npos ||
-            known.find(normalizedFolderName) != std::wstring::npos) {
+        if (ContainsAsSubstring(known, normalizedFolderName) ||
+            ContainsAsSubstring(normalizedFolderName, known)) {
             return true;
         }
     }

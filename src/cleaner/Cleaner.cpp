@@ -17,7 +17,12 @@ namespace {
 // moderna, preferida a SHFileOperationW por lidar melhor com caminhos longos
 // e reportar erro por item). FOF_ALLOWUNDO é o que torna a exclusão
 // reversível pelo usuário através da própria Lixeira do Windows.
-bool SendToRecycleBin(const std::vector<ScanItem>& items, std::string& errorSummary) {
+// `succeeded` recebe apenas os itens de fato enfileirados com sucesso — o
+// chamador so deve contabilizar bytes liberados/gravar no historico para
+// esses, nao para `items` inteiro, ja que um item pode ter sido
+// removido/renomeado entre o scan e a limpeza.
+bool SendToRecycleBin(const std::vector<ScanItem>& items, std::string& errorSummary,
+                      std::vector<ScanItem>& succeeded, std::size_t& itemsSkipped) {
     if (items.empty()) return true;
 
     ComPtr<IFileOperation> fileOp;
@@ -25,25 +30,39 @@ bool SendToRecycleBin(const std::vector<ScanItem>& items, std::string& errorSumm
                                     IID_PPV_ARGS(&fileOp));
     if (FAILED(hr)) {
         errorSummary = "Falha ao iniciar operacao de arquivo (COM)";
+        itemsSkipped += items.size();
         return false;
     }
 
     fileOp->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT |
                               FOF_NOERRORUI);
 
-    bool anyItemAdded = false;
     for (const auto& item : items) {
         ComPtr<IShellItem> shellItem;
         hr = ::SHCreateItemFromParsingName(item.path.c_str(), nullptr, IID_PPV_ARGS(&shellItem));
-        if (FAILED(hr)) continue; // item pode ter sido removido/renomeado entre o scan e a limpeza
-        if (SUCCEEDED(fileOp->DeleteItem(shellItem.Get(), nullptr))) anyItemAdded = true;
+        if (FAILED(hr)) {
+            ++itemsSkipped; // item pode ter sido removido/renomeado entre o scan e a limpeza
+            continue;
+        }
+        if (SUCCEEDED(fileOp->DeleteItem(shellItem.Get(), nullptr)))
+            succeeded.push_back(item);
+        else
+            ++itemsSkipped;
     }
 
-    if (!anyItemAdded) return true; // nada de válido para excluir não é um erro
+    if (succeeded.empty()) return true; // nada de válido para excluir não é um erro
 
     hr = fileOp->PerformOperations();
     if (FAILED(hr)) {
+        // IFileOperation sem um IFileOperationProgressSink nao diz quais
+        // itens do lote de fato foram movidos antes da falha agregada — so
+        // sabemos que PerformOperations, como um todo, nao teve sucesso.
+        // Escolha deliberadamente conservadora: contar tudo como "nao
+        // confirmado" (itemsSkipped) em vez de arriscar contabilizar bytes
+        // liberados de itens que podem nao ter sido de fato excluidos.
         errorSummary = "Falha ao mover itens para a Lixeira";
+        itemsSkipped += succeeded.size();
+        succeeded.clear();
         return false;
     }
     return true;
@@ -83,8 +102,9 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
     std::string errorSummary;
 
     if (!cancel.load() && !reversible.empty()) {
-        if (SendToRecycleBin(reversible, errorSummary)) {
-            for (const auto& item : reversible) {
+        std::vector<ScanItem> reversibleSucceeded;
+        if (SendToRecycleBin(reversible, errorSummary, reversibleSucceeded, entry.itemsSkipped)) {
+            for (const auto& item : reversibleSucceeded) {
                 entry.bytesFreedByCategory[item.category] += item.sizeBytes;
                 entry.totalBytesFreed += item.sizeBytes;
                 if (entry.items.size() < HistoryEntry::kMaxItemsPerEntry)
@@ -93,7 +113,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
         } else {
             entry.success = false;
         }
-        snapshot.itemsProcessed += reversible.size();
+        snapshot.itemsProcessed += reversibleSucceeded.size();
         progress.Update(snapshot);
     }
 
@@ -108,6 +128,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
             entry.totalBytesFreed += freedBefore;
         } else {
             entry.success = false;
+            entry.itemsSkipped += recycleBinToEmpty.size();
             if (!errorSummary.empty()) errorSummary += "; ";
             errorSummary += "Falha ao esvaziar a Lixeira";
         }
@@ -115,7 +136,15 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
 
     // Pontos de restauração removidos via vssadmin também não têm "desfazer".
     if (!cancel.load() && !restorePointsToDelete.empty()) {
-        for (const auto& item : restorePointsToDelete) {
+        for (std::size_t i = 0; i < restorePointsToDelete.size(); ++i) {
+            if (cancel.load()) {
+                // Os itens ainda nao processados nao devem virar "sucesso
+                // silencioso" no historico — sem isso, uma limpeza cancelada
+                // no meio do caminho apareceria como "OK" completo.
+                entry.itemsSkipped += restorePointsToDelete.size() - i;
+                break;
+            }
+            const auto& item = restorePointsToDelete[i];
             if (DeleteShadowCopy(item.path)) {
                 entry.bytesFreedByCategory[Category::RestorePoints] += item.sizeBytes;
                 entry.totalBytesFreed += item.sizeBytes;
@@ -123,6 +152,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
                     entry.items.push_back({item.path, item.sizeBytes, item.category});
             } else {
                 entry.success = false;
+                ++entry.itemsSkipped;
                 if (!errorSummary.empty()) errorSummary += "; ";
                 errorSummary += "Falha ao remover ponto de restauracao (vssadmin)";
             }

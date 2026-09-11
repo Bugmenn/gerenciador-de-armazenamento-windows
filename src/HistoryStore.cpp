@@ -74,6 +74,7 @@ json ToJson(const HistoryEntry& entry) {
     j["success"] = entry.success;
     j["errorSummary"] = entry.errorSummary;
     j["wasAutomatic"] = entry.wasAutomatic;
+    j["itemsSkipped"] = entry.itemsSkipped;
 
     json byCategory = json::object();
     for (const auto& [category, bytes] : entry.bytesFreedByCategory)
@@ -91,6 +92,7 @@ HistoryEntry EntryFromJson(const json& j) {
     entry.success = j.value("success", true);
     entry.errorSummary = j.value("errorSummary", std::string());
     entry.wasAutomatic = j.value("wasAutomatic", false);
+    entry.itemsSkipped = j.value("itemsSkipped", std::size_t{0});
 
     if (j.contains("bytesFreedByCategory")) {
         for (const auto& [key, value] : j["bytesFreedByCategory"].items()) {
@@ -128,6 +130,9 @@ void AppendHistoryEntry(const HistoryEntry& entry) {
     if (capped.items.size() > HistoryEntry::kMaxItemsPerEntry)
         capped.items.resize(HistoryEntry::kMaxItemsPerEntry);
     entries.push_back(capped);
+
+    if (entries.size() > HistoryEntry::kMaxEntries)
+        entries.erase(entries.begin(), entries.end() - HistoryEntry::kMaxEntries);
 
     json arr = json::array();
     for (const auto& e : entries) arr.push_back(ToJson(e));
