@@ -1,0 +1,16 @@
+# Visual Studio
+.vs/
+out/
+*.user
+
+# CMake
+build/
+build_check/
+CMakeFiles/
+CMakeCache.txt
+
+# Binários
+*.obj
+*.exe
+*.pdb
+*.ilk
