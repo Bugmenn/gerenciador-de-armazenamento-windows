@@ -5,6 +5,16 @@ identifica arquivos e dados que podem ser removidos com segurança para
 liberar espaço, e permite ao usuário revisar e limpar — manualmente ou de
 forma agendada.
 
+## Download
+
+Não precisa compilar para usar: baixe `StorageCleaner.exe` na
+[página de releases](https://github.com/Bugmenn/gerenciador-de-armazenamento-windows/releases/latest).
+
+Requer o [Visual C++ Redistributable 2015-2022 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+— a maioria dos PCs Windows já tem instalado. Pontos de restauração (VSS)
+exigem rodar o `.exe` como Administrador; sem isso essa categoria é pulada
+e a UI mostra um aviso em vez de falhar.
+
 ## O que ele varre
 
 | Categoria | O que é | Exclusão |
@@ -80,17 +90,16 @@ testável fora do Windows, porque é a única peça de lógica sem dependência 
 API do Windows — o restante (scanners, config, histórico) depende de
 Win32/COM/VSS e só builda numa máquina Windows real.
 
-## Verificado neste ambiente de desenvolvimento
+## Verificado
 
-Este projeto foi escrito e revisado num container Linux sem toolchain
-Windows disponível. O que foi possível verificar aqui:
-- Revisão de código de todos os arquivos.
-- Compilação e execução real de `tests/test_duplicate_grouping.cpp` (lógica
-  pura, sem I/O nem APIs do Windows).
-- Checagem de sintaxe dos headers compartilhados (`include/storagecleaner`).
+Build completo (MSVC 19.44, Debug e Release) já foi compilado e rodado numa
+máquina Windows real: janela abre, renderização DirectX 11 funciona, varredura
+de disco real (temporários, cache de navegador, duplicados, logs, dados
+órfãos) encontra itens de verdade, seleção/limpeza pela UI funciona, e a
+release `v0.1.0` builda com 0 erros/0 warnings.
 
-Ainda precisa ser verificado numa máquina Windows real: build completo com
-MSVC/MinGW, varreduras reais em disco, `IFileOperation` enviando de fato
-para a Lixeira, comportamento do `vssadmin` (varia por versão/idioma do
-Windows) e do modo não-elevado, `SHQueryRecycleBinW`/`SHEmptyRecycleBinW`,
-registro de início automático, e a renderização DirectX 11 em hardware real.
+Ainda não verificado em uso real: comportamento do `vssadmin` em outras
+versões/idiomas do Windows, `IFileOperation` enviando para a Lixeira em
+todos os cenários de permissão (arquivo em uso, sem permissão, etc.),
+registro de início automático, e a limpeza automática agendada rodando por
+um período longo sem supervisão.
