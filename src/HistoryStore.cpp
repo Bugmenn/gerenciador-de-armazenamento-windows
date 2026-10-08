@@ -29,18 +29,6 @@ fs::path AppDataDir() {
 
 fs::path HistoryPath() { return AppDataDir() / L"history.json"; }
 
-std::string CategoryToKey(Category c) { return CategoryName(c); }
-
-bool CategoryFromKey(const std::string& key, Category& out) {
-    for (Category c : kAllCategories) {
-        if (CategoryToKey(c) == key) {
-            out = c;
-            return true;
-        }
-    }
-    return false;
-}
-
 std::int64_t ToUnixSeconds(std::chrono::system_clock::time_point tp) {
     return std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch()).count();
 }
@@ -53,7 +41,7 @@ json ToJson(const HistoryItemRecord& item) {
     json j;
     j["path"] = util::WideToUtf8(item.path);
     j["sizeBytes"] = item.sizeBytes;
-    j["category"] = CategoryToKey(item.category);
+    j["category"] = CategoryKey(item.category);
     return j;
 }
 
@@ -78,7 +66,7 @@ json ToJson(const HistoryEntry& entry) {
 
     json byCategory = json::object();
     for (const auto& [category, bytes] : entry.bytesFreedByCategory)
-        byCategory[CategoryToKey(category)] = bytes;
+        byCategory[CategoryKey(category)] = bytes;
     j["bytesFreedByCategory"] = byCategory;
 
     for (const auto& item : entry.items) j["items"].push_back(ToJson(item));

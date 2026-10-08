@@ -240,13 +240,13 @@ int RunApp(bool startMinimized) {
         {
             LightScanTotals headerTotals = state.GetLightTotals();
             std::uint64_t detectable = headerTotals.recycleBinBytes + headerTotals.tempBytes;
-            ImGui::TextColored(theme::kTextMuted, "Espaco detectavel agora: %s",
+            ImGui::TextColored(theme::kTextMuted, "Espaço detectável agora: %s",
                                util::FormatSize(detectable).c_str());
         }
         ImGui::Separator();
 
         if (ImGui::BeginTabBar("MainTabs")) {
-            if (ImGui::BeginTabItem("Dashboard")) {
+            if (ImGui::BeginTabItem("Painel")) {
                 DrawDashboardPanel(state);
                 ImGui::EndTabItem();
             }
@@ -254,11 +254,11 @@ int RunApp(bool startMinimized) {
                 DrawResultsPanel(state);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Configuracoes")) {
+            if (ImGui::BeginTabItem("Configurações")) {
                 DrawSettingsPanel(state);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Historico")) {
+            if (ImGui::BeginTabItem("Histórico")) {
                 DrawHistoryPanel(state);
                 ImGui::EndTabItem();
             }

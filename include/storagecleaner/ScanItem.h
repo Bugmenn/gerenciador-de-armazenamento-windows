@@ -22,7 +22,25 @@ inline constexpr Category kAllCategories[] = {
     Category::OrphanedApps,
 };
 
+// Nome exibido na UI — pode mudar livremente (texto, acentuação).
 inline const char* CategoryName(Category c) {
+    switch (c) {
+        case Category::TempFiles:     return "Arquivos temporários";
+        case Category::BrowserCache:  return "Cache de navegador";
+        case Category::Duplicate:     return "Arquivos duplicados";
+        case Category::OldLogs:       return "Logs antigos";
+        case Category::RecycleBin:    return "Lixeira";
+        case Category::RestorePoints: return "Pontos de restauração";
+        case Category::OrphanedApps:  return "Dados órfãos (apps desinstalados)";
+    }
+    return "Desconhecido";
+}
+
+// Chave de persistência em config.json/history.json — NUNCA alterar: são os
+// nomes antigos (sem acento) com que arquivos já gravados foram salvos. Mudar
+// aqui faz o app ignorar a config/histórico existentes sem erro (travado por
+// tests/test_category_keys.cpp).
+inline const char* CategoryKey(Category c) {
     switch (c) {
         case Category::TempFiles:     return "Arquivos temporarios";
         case Category::BrowserCache:  return "Cache de navegador";
@@ -33,6 +51,16 @@ inline const char* CategoryName(Category c) {
         case Category::OrphanedApps:  return "Dados orfaos (apps desinstalados)";
     }
     return "Desconhecido";
+}
+
+inline bool CategoryFromKey(const std::string& key, Category& out) {
+    for (Category c : kAllCategories) {
+        if (key == CategoryKey(c)) {
+            out = c;
+            return true;
+        }
+    }
+    return false;
 }
 
 // A Lixeira e os pontos de restauração não têm conceito de "desfazer": esvaziar

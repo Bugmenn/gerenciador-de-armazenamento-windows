@@ -43,7 +43,7 @@ limpeza automática agendada, mesmo que esteja habilitada.
   automaticamente".
 - **Segundo plano**: o app pode iniciar junto com o Windows e ficar
   minimizado na bandeja do sistema, fazendo varreduras leves periódicas
-  (só tamanhos agregados, sem hash de duplicados) para manter o Dashboard
+  (só tamanhos agregados, sem hash de duplicados) para manter o Painel
   atualizado. Fechar a janela pela barra de título apenas a esconde; a saída
   real do processo é pelo item "Sair" no menu da bandeja.
 - **Limpeza automática agendada**: configurável para rodar todo dia, a cada
@@ -66,7 +66,7 @@ agora** e **Sair** — sem atalhos de teclado associados.
 
 ### Durante uma varredura
 
-O Dashboard mostra um indicador circular de progresso, a fase atual, o
+O Painel mostra um indicador circular de progresso, a fase atual, o
 item sendo processado no momento, quantos itens já foram processados e
 quantos bytes já foram encontrados. Fora de uma varredura, a mesma aba
 mostra permanentemente dois totais atualizados automaticamente em segundo
@@ -155,14 +155,15 @@ Administrador; sem isso, essa categoria é pulada e a UI mostra um aviso.
 ## Testes
 
 ```powershell
-cmake --build build --target test_duplicate_grouping
+cmake --build build --target test_duplicate_grouping test_category_keys
 ctest --test-dir build
 ```
 
-Só o agrupamento de duplicados (`tests/test_duplicate_grouping.cpp`) é
-testável fora do Windows, porque é a única peça de lógica sem dependência de
-API do Windows — o restante (scanners, config, histórico) depende de
-Win32/COM/VSS e só builda numa máquina Windows real.
+Só o agrupamento de duplicados (`tests/test_duplicate_grouping.cpp`) e as
+chaves de persistência das categorias (`tests/test_category_keys.cpp`) são
+testáveis fora do Windows, porque são as únicas peças de lógica sem
+dependência de API do Windows — o restante (scanners, config, histórico)
+depende de Win32/COM/VSS e só builda numa máquina Windows real.
 
 ## Verificado
 

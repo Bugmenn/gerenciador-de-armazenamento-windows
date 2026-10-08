@@ -159,8 +159,8 @@ void UiState::Tick() {
         std::lock_guard<std::mutex> lock(cleanResultMutex);
         if (pendingCleanResult.has_value()) {
             std::wstring text =
-                L"Espaco liberado: " + util::Utf8ToWide(util::FormatSize(pendingCleanResult->totalBytesFreed));
-            ShowTrayBalloon(L"Limpeza automatica concluida", text.c_str());
+                L"Espaço liberado: " + util::Utf8ToWide(util::FormatSize(pendingCleanResult->totalBytesFreed));
+            ShowTrayBalloon(L"Limpeza automática concluída", text.c_str());
             autoCleanNotifyArmed = false;
         }
     }

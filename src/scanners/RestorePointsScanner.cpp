@@ -60,7 +60,7 @@ std::vector<ScanItem> ScanRestorePoints(const Config& config, ProgressChannel& p
         // a UI mostra um aviso pedindo para reabrir o app como Administrador
         // em vez de reportar isso como um erro genérico.
         snapshot.lastError =
-            "Pontos de restauracao requerem executar como Administrador";
+            "Pontos de restauração exigem executar como Administrador";
         progress.Update(snapshot);
         return items;
     }

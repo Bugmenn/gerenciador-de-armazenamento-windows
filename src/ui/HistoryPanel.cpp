@@ -60,7 +60,7 @@ void DrawHistoryPanel(UiState& state) {
             }
 
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(entry.wasAutomatic ? "Automatica" : "Manual");
+            ImGui::TextUnformatted(entry.wasAutomatic ? "Automática" : "Manual");
 
             ImGui::TableSetColumnIndex(3);
             if (entry.success && entry.itemsSkipped == 0) {

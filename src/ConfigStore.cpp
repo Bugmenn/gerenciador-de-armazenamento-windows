@@ -28,21 +28,6 @@ fs::path AppDataDir() {
 
 fs::path ConfigPath() { return AppDataDir() / L"config.json"; }
 
-// Categorias precisam ser chaves de string em JSON (mapas em nlohmann::json
-// exigem chave textual) — serializamos pelo nome legível já existente para
-// manter o arquivo humano/depurável, com um lookup reverso para desserializar.
-std::string CategoryToKey(Category c) { return CategoryName(c); }
-
-bool CategoryFromKey(const std::string& key, Category& out) {
-    for (Category c : kAllCategories) {
-        if (CategoryToKey(c) == key) {
-            out = c;
-            return true;
-        }
-    }
-    return false;
-}
-
 json ToJson(const CategoryConfig& cc) {
     json j;
     j["enabled"] = cc.enabled;
@@ -64,9 +49,11 @@ json ToJson(const Config& config) {
     for (const auto& p : config.duplicateScanRoots)
         j["duplicateScanRoots"].push_back(util::WideToUtf8(p));
 
+    // Mapas em nlohmann::json exigem chave textual — CategoryKey (ScanItem.h)
+    // dá uma chave legível e estável, desacoplada do nome exibido na UI.
     json perCategory = json::object();
     for (const auto& [category, cc] : config.perCategory)
-        perCategory[CategoryToKey(category)] = ToJson(cc);
+        perCategory[CategoryKey(category)] = ToJson(cc);
     j["perCategory"] = perCategory;
 
     j["startWithWindows"] = config.startWithWindows;

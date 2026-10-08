@@ -95,7 +95,7 @@ bool SendToRecycleBin(const std::vector<ScanItem>& items, std::vector<bool>& suc
     HRESULT hr = ::CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL,
                                     IID_PPV_ARGS(&fileOp));
     if (FAILED(hr)) {
-        errorSummary = "Falha ao iniciar operacao de arquivo (COM)";
+        errorSummary = "Falha ao iniciar operação de arquivo (COM)";
         return false;
     }
 
@@ -209,7 +209,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
         entry.itemsSkipped += failedReversibleCount;
         if (!errorSummary.empty()) errorSummary += "; ";
         errorSummary += std::to_string(failedReversibleCount) +
-                        " item(ns) nao puderam ser movidos para a Lixeira (ex.: em uso por "
+                        " item(ns) não puderam ser movidos para a Lixeira (ex.: em uso por "
                         "outro programa)";
     }
 
@@ -262,7 +262,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
                 entry.success = false;
                 ++entry.itemsSkipped;
                 if (!errorSummary.empty()) errorSummary += "; ";
-                errorSummary += "Falha ao remover ponto de restauracao (vssadmin)";
+                errorSummary += "Falha ao remover ponto de restauração (vssadmin)";
             }
         }
     }

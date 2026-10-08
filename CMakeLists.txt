@@ -82,8 +82,12 @@ target_compile_definitions(StorageCleaner PRIVATE UNICODE _UNICODE NOMINMAX)
 # (warning C4530 em todo arquivo que inclui <string>/<chrono>) e o try/catch
 # real do projeto (ex.: parsing de JSON em HistoryStore.cpp) fica sem garantia
 # de unwind correto.
+#
+# /utf-8: os fontes sao UTF-8 sem BOM; sem essa flag o MSVC os le na code page
+# do sistema (1252) e todo literal acentuado de UI (inclusive L"...") sai
+# corrompido. GCC/MinGW ja assume UTF-8 por padrao.
 if(MSVC)
-    target_compile_options(StorageCleaner PRIVATE /EHsc)
+    target_compile_options(StorageCleaner PRIVATE /EHsc /utf-8)
 endif()
 
 target_link_libraries(StorageCleaner PRIVATE

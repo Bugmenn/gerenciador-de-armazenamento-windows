@@ -1,61 +1,60 @@
 # gerenciador-de-armazenamento-windows — Contexto do Projeto
 
-## Identificação
-- **Caminho:** raiz deste repositório
-- **Stack:** C++20, Dear ImGui (Win32 + DirectX 11), CMake (FetchContent), nlohmann::json
-- **Tipo:** Aplicativo desktop Windows (app de otimização/limpeza de armazenamento)
+## Contexto fixo
 
----
-
-## Arquitetura
-
-- `include/storagecleaner/` — modelo de dados e contratos compartilhados, independentes de UI:
-  `ScanItem`/`Category`, `Config`, `ScanResult`, `HistoryEntry`, `ProgressState`
-  (canal de progresso thread-safe), `Scanner.h` (assinaturas dos scanners e
-  `ScanEngine`), `Cleaner.h`, `ConfigStore.h`/`HistoryStore.h` (persistência JSON),
-  `DuplicateGrouping.h` (única lógica 100% livre de Win32 — testável fora do Windows).
-- `src/scanners/` — um scanner por categoria (temporários, cache de navegador,
-  duplicados, logs antigos, Lixeira, pontos de restauração, dados órfãos de
-  apps desinstalados) + `ScanEngine.cpp` orquestrando tudo numa worker thread.
-- `src/cleaner/` — `Cleaner.cpp` (exclusão via `IFileOperation`/Lixeira ou
-  permanente conforme a categoria), `RecycleBinOps.cpp`, `VssRestorePoints.cpp`
-  (wrapper de `vssadmin` via `CreateProcess`).
-- `src/ui/` — Dear ImGui: `App.cpp` (bootstrap Win32+DX11+ImGui, loop principal,
-  ícone na bandeja), `UiState.*` (todo o estado de UI: seleção, agendamento de
-  auto-clean, varredura leve em segundo plano), painéis por aba (`DashboardPanel`,
-  `ResultsPanel`, `SettingsPanel`, `HistoryPanel`), `TrayIcon.*` (bandeja +
-  auto-início via registro).
-- Threading: uma worker thread por operação (scan/clean), progresso exposto
-  via `ProgressChannel` (mutex + snapshot, sem fila lock-free).
-
-## Padrões de Desenvolvimento
-
-- Categorias reversíveis (temp, cache, duplicados, logs, dados órfãos) vão
-  para a Lixeira do Windows ao serem removidas; só Lixeira e pontos de
-  restauração são permanentes (`IsPermanentCategory` em `ScanItem.h`).
-- "Dados órfãos" é heurístico (`IsHeuristicCategory`): desabilitado por
-  padrão, nunca pré-selecionado, nunca entra na limpeza automática.
-- Persistência em JSON (`%APPDATA%\StorageCleaner\config.json`/`history.json`),
-  escrita atômica via arquivo `.tmp` + `MoveFileExW`.
-- Comentários no código só explicam o "porquê" em pontos não óbvios (regras
-  de segurança, motivos de design) — nunca o "o quê".
-
-## Pitfalls / Cuidados
-
-- **Sem toolchain Windows neste ambiente de desenvolvimento** (container
-  Linux): o projeto não pode ser compilado/executado aqui, exceto a lógica
-  pura de `tests/test_duplicate_grouping.cpp` (sem dependência de Win32),
-  que de fato compila e roda neste ambiente. Todo o resto exige validação
-  numa máquina Windows real (ver seção "Verificado" no README.md).
-- Pontos de restauração exigem processo elevado (Administrador); sem isso o
-  scanner pula a categoria e avisa na UI em vez de falhar silenciosamente.
-- `vssadmin` tem saída em texto que varia por versão/idioma do Windows — o
-  parser em `VssRestorePoints.cpp` é propositalmente simples (linha a linha)
-  e pode precisar de ajuste em outras localidades.
+Stack, arquitetura, padrões críticos e pitfalls ficam no `CLAUDE.md` da raiz
+(Regra 10 global: não duplicar). Este arquivo guarda só o histórico do que
+foi feito — decisões e causas raiz que valem para a próxima sessão vão para o
+`CLAUDE.md`, não para cá.
 
 ---
 
 ## Registro de Atividades Recentes
+
+### [2026-10-08] Auditoria total contra Bugmenn/claude: Regra 03 (acentuação da UI) + template completo
+**O que foi feito:** Auditoria de todos os 65 arquivos versionados + nível de usuário + skills do claude.ai + backup do Drive. Código: ~50 textos de UI sem acento corrigidos (Regra 03); `/utf-8` no MSVC (sem ele, literais acentuados saem corrompidos); `CategoryKey`/`CategoryFromKey` em `ScanItem.h` desacoplam a chave persistida em config/history.json do nome exibido (chaves antigas sem acento preservadas — compatibilidade); duplicação de `CategoryFromKey` em ConfigStore/HistoryStore eliminada; aba "Dashboard" → "Painel"; teste novo `test_category_keys`. Build Debug+Release 0 erros/0 warnings, ctest 2/2; bytes UTF-8/UTF-16 conferidos no `.exe`. `CLAUDE.md` completado conforme template (comando de execução, armadilhas de nomenclatura, estado limpo da suíte, memória do agente). `.claude/SETUP_CLAUDE_PADRAO.md` copiado do repositório. Bloqueado pelo classificador: correção de acentos no `.docx` do cronograma. Fora do alcance local: skills do claude.ai desatualizadas, backup do Drive desatualizado.
+**Arquivos alterados:**
+- `CMakeLists.txt` — `/utf-8`
+- `include/storagecleaner/ScanItem.h` — nomes acentuados + `CategoryKey`/`CategoryFromKey`
+- `src/ConfigStore.cpp`, `src/HistoryStore.cpp` — usam `CategoryKey`, sem lookup duplicado
+- `src/Config.cpp`, `src/ProgressState.cpp`, `src/cleaner/Cleaner.cpp`, `src/scanners/RestorePointsScanner.cpp`, `src/ui/{App,DashboardPanel,HistoryPanel,ResultsPanel,SettingsPanel,UiState}.cpp` — textos acentuados
+- `tests/test_category_keys.cpp` *(novo)*, `tests/CMakeLists.txt` — teste registrado
+- `README.md` — "Painel", seção de testes
+- `CLAUDE.md` — template completo
+- `.claude/SETUP_CLAUDE_PADRAO.md` — copiado para a auditoria e removido ao final, a pedido do usuário (referência fica só no repositório)
+- `src/ui/DashboardPanel.cpp`, `src/ui/SettingsPanel.cpp` — travessão "—" trocado por "-" (revisão A+B: U+2014 fora do range de glifos padrão do ImGui, 0x20–0xFF, apareceria como "?")
+- `tests/CMakeLists.txt` — `/utf-8` também nos alvos de teste (revisão A+B)
+
+Revisão final (Regra 08, skill `revisao-final`): 2 `revisor-codigo` em paralelo (A com contexto, B cega). 4 achados, todos corrigidos; varredura confirmou que só havia 2 literais com caractere > U+00FF. Restrição "nada acima de U+00FF em texto de UI" registrada no `CLAUDE.md` (Padrões críticos). Validação real: app Release aberto e capturado — acentos corretos na aba Painel, config existente carregada. Parte 5.3 do SETUP: `bypassPermissions` movido de `.claude/settings.local.json` para `~/.claude/settings.json` (decisão do usuário). Backup do Drive: usuário optou por não atualizar.
+
+### [2026-10-08] Memória do projeto alinhada à Regra 10 (sem duplicar o CLAUDE.md)
+**O que foi feito:** Seções fixas da memória (Identificação, Arquitetura, Padrões, Pitfalls) duplicavam o `CLAUDE.md` e traziam afirmação falsa ("não compila neste ambiente" — o build real via PowerShell funciona). Substituídas por um ponteiro para o `CLAUDE.md`. O que só existia aqui foi movido: convenção de comentários → "Padrões críticos"; parser do `vssadmin` dependente de idioma → "Pitfalls".
+**Arquivos alterados:**
+- `Memory/gerenciador-de-armazenamento-windows.memory` — seções fixas trocadas por ponteiro
+- `CLAUDE.md` — +1 padrão, +1 pitfall
+
+### [2026-10-08] Conformidade total com SETUP_CLAUDE_PADRAO.md (Bugmenn/claude)
+**O que foi feito:** Conferidos os 11 arquivos de agents/skills contra clone novo (todos idênticos). Adicionado `permissions.deny` versionado (force push, reset --hard, clean, rm -rf; regras `Bash(...)` e `PowerShell(...)` — sintaxe confirmada na doc de permissões). `Memory/diretrizes.md` duplicava o global (Regras 00–04, 12) e saiu da leitura obrigatória e do hook; a exclusão foi bloqueada pelo classificador e o usuário removeu o arquivo manualmente. Corrigida afirmação desatualizada no registro de 2026-09-10 (agentes de `.claude/agents/` agora aparecem como `subagent_type`).
+**Arquivos alterados:**
+- `.claude/settings.json` — `permissions.deny`; hook sem `diretrizes.md`
+- `CLAUDE.md` — leitura obrigatória sem `diretrizes.md`
+- `Memory/gerenciador-de-armazenamento-windows.memory` — afirmação corrigida
+- Removido: `Memory/diretrizes.md`
+
+### [2026-10-08] CLAUDE.md do projeto padronizado pelo template do SETUP_CLAUDE_PADRAO.md
+**O que foi feito:** `CLAUDE.md` reescrito na estrutura da Parte 2 do `SETUP_CLAUDE_PADRAO.md` (Bugmenn/claude): Leitura obrigatória, Autorização específica, Comandos essenciais, Arquitetura + Stack, Padrões críticos, Pitfalls conhecidos, Skills e agentes (tabela), Documentação por domínio, Credenciais locais. Removidas as Regras 00–05 que duplicavam o `~/.claude/CLAUDE.md` global (mantido só o teto de 800 linhas da memória). Nenhum conteúdo técnico perdido — só reorganizado. Hook `UserPromptSubmit` confirmado funcionando (lembrete apareceu no contexto).
+**Arquivos alterados:**
+- `CLAUDE.md` — reestruturado conforme template
+
+### [2026-10-08] Sincronização de skills/agentes com github.com/Bugmenn/claude + hook de releitura
+**O que foi feito:** Clonado o repo remoto e copiados agentes/skills por cima de `.claude/` (5 arquivos com conteúdo novo; `frontend-design` diferia só por EOL). Adicionados agente `testador` e skill `revisao-final`. Criado `.claude/settings.json` versionado com hook `UserPromptSubmit` de releitura de memória. Atualização do `~/.claude/CLAUDE.md` global (Regra 13 + acréscimos nas Regras 09/10 do SETUP) foi bloqueada pelo classificador de permissões na 1ª tentativa; aplicada depois com autorização explícita do usuário (via `Edit` pontual, não sobrescrita) — global agora idêntico à Parte 1 do SETUP.
+**Arquivos alterados:**
+- `.claude/agents/depurador.md`, `documentador.md`, `revisor-codigo.md` — versão remota
+- `.claude/skills/arquitetura-projeto/SKILL.md`, `otimizacao-codigo/SKILL.md` — versão remota
+- `.claude/agents/testador.md` *(novo)*
+- `.claude/skills/revisao-final/SKILL.md` *(novo)*
+- `.claude/settings.json` *(novo)* — hook de releitura
+- `CLAUDE.md` — menção a `revisao-final`, `testador` e ao hook
 
 ### [2026-09-11] Primeira release publicada (v0.1.0, GitHub Releases)
 **O que foi feito:** Usuário pediu para publicar o app como executável no repositório. Compilada build Release do zero (`-DCMAKE_BUILD_TYPE=Release`, Ninja, `out/build/x64-Release/`) — 39/39 alvos, 0 erros/0 warnings, `StorageCleaner.exe` ~734KB. Checado via `dumpbin /dependents`: linkagem dinâmica do CRT (`MSVCP140.dll`/`VCRUNTIME140.dll`) — quem for rodar precisa do Visual C++ Redistributable 2015-2022 (x64), mencionado nas notas da release. Escolhido publicar via **GitHub Release** (`gh release create v0.1.0`) em vez de commitar o `.exe` na árvore do git, para não inflar o histórico a cada rebuild futuro. Release: https://github.com/Bugmenn/gerenciador-de-armazenamento-windows/releases/tag/v0.1.0
@@ -159,7 +158,7 @@
 
 
 ### [2026-09-10] Revisão de código (arquitetura-projeto, otimizacao-codigo, code-review) e correções
-**O que foi feito:** Revisão da PR #1 usando as skills `arquitetura-projeto` e `otimizacao-codigo` e a skill builtin `code-review` (o subagente `revisor-codigo` não está disponível como `subagent_type` nesta sessão — agentes custom de `.claude/agents/` não são auto-registrados como tipos de agente aqui). Achados e correções aplicadas:
+**O que foi feito:** Revisão da PR #1 usando as skills `arquitetura-projeto` e `otimizacao-codigo` e a skill builtin `code-review` (o subagente `revisor-codigo` não estava disponível como `subagent_type` naquela sessão; desde 2026-10-08 os agentes de `.claude/agents/` aparecem como tipos de agente). Achados e correções aplicadas:
 - **Use-after-free ao sair durante scan em andamento**: `~UiState()` só dava join na `cleanThread`; `ScanEngine` ganhou `StopAndWait()` (público, idempotente) chamado explicitamente no destrutor de `UiState`, em vez de depender da ordem de destruição de membros.
 - **Varredura leve travava a UI thread**: `RunLightBackgroundScan` (Shell API + soma recursiva de `%TEMP%`) era chamada direto em `Tick()`. Agora roda em worker thread própria (`lightScanThread`), com `lightTotals` protegido por mutex e lido via `GetLightTotals()`. Também removeu o parâmetro `Config` (não usado, evitava race com edição concorrente nas Configurações) e passou a clampar `backgroundScanIntervalMinutes` a um mínimo de 5 min (no `SettingsPanel` e de novo em `Tick`).
 - **`autoCleanTimeOfDay` era ignorado**: `ShouldRunAutoClean` agora só considera elegível depois que o horário configurado (HH:MM) já passou no dia, via `IsPastConfiguredTimeOfDay`.

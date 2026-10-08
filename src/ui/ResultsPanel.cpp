@@ -16,7 +16,7 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
 
     if (IsHeuristicCategory(bucket.category)) {
         ImGui::TextColored(theme::kWarning,
-                           "Heuristico: pode incluir falsos positivos (ex: apps portateis ou "
+                           "Heurístico: pode incluir falsos positivos (ex.: apps portáteis ou "
                            "pouco usados). Revise cada item antes de excluir.");
     }
 
@@ -48,7 +48,7 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
             const ScanItem& item = bucket.items[i];
             ImGui::TextUnformatted(util::WideToUtf8(item.path).c_str());
             if (item.category == Category::Duplicate && !item.keepPath.empty())
-                ImGui::TextDisabled("mantem: %s", util::WideToUtf8(item.keepPath).c_str());
+                ImGui::TextDisabled("mantém: %s", util::WideToUtf8(item.keepPath).c_str());
 
             ImGui::TableSetColumnIndex(2);
             ImGui::TextUnformatted(util::FormatSize(item.sizeBytes).c_str());
@@ -63,7 +63,7 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
 
 void DrawResultsPanel(UiState& state) {
     if (!state.hasScanResult) {
-        ImGui::TextUnformatted("Nenhuma varredura ainda. Va para a aba Dashboard e clique em Escanear.");
+        ImGui::TextUnformatted("Nenhuma varredura ainda. Vá para a aba Painel e clique em Escanear.");
         return;
     }
 
@@ -90,12 +90,12 @@ void DrawResultsPanel(UiState& state) {
                               ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("Isso vai remover %zu item(ns), liberando %s.", selection.count,
                    util::FormatSize(selection.bytes).c_str());
-        ImGui::TextUnformatted("Arquivos temporarios, cache, duplicados, logs e dados orfaos vao"
+        ImGui::TextUnformatted("Arquivos temporários, cache, duplicados, logs e dados órfãos vão"
                               " para a Lixeira (podem ser restaurados).");
         if (selection.anyPermanent)
             ImGui::TextColored(theme::kDanger,
-                              "Atencao: Lixeira e/ou pontos de restauracao selecionados serao "
-                              "removidos em definitivo, sem opcao de desfazer.");
+                              "Atenção: Lixeira e/ou pontos de restauração selecionados serão "
+                              "removidos em definitivo, sem opção de desfazer.");
 
         // A lista completa de itens (com paths) só precisa existir de fato no
         // clique do botão — não a cada frame enquanto o modal fica aberto.
@@ -126,10 +126,10 @@ void DrawResultsPanel(UiState& state) {
         if (state.pendingCleanResult.has_value()) {
             const HistoryEntry& entry = *state.pendingCleanResult;
             if (entry.success)
-                ImGui::TextColored(theme::kSuccess, "Limpeza concluida: %s liberados.",
+                ImGui::TextColored(theme::kSuccess, "Limpeza concluída: %s liberados.",
                                   util::FormatSize(entry.totalBytesFreed).c_str());
             else
-                ImGui::TextColored(theme::kDanger, "Limpeza concluida com erros: %s",
+                ImGui::TextColored(theme::kDanger, "Limpeza concluída com erros: %s",
                                   entry.errorSummary.c_str());
         }
     }

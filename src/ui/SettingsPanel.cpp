@@ -22,19 +22,19 @@ void DrawSettingsPanel(UiState& state) {
 
     ImGui::TextUnformatted("Limites gerais");
     int minSizeKb = MinFileSizeKb(config);
-    if (ImGui::InputInt("Tamanho minimo de arquivo (KB)", &minSizeKb)) {
+    if (ImGui::InputInt("Tamanho mínimo de arquivo (KB)", &minSizeKb)) {
         if (minSizeKb < 0) minSizeKb = 0;
         config.minFileSizeBytes = static_cast<std::uint64_t>(minSizeKb) * 1024;
     }
     // SanitizeConfig e' chamada uma unica vez apos os tres campos (em vez de
     // um `if` por campo) para nao precisar lembrar de repetir a chamada a
     // cada novo campo clampado que for adicionado aqui no futuro.
-    bool tempAgeChanged = ImGui::InputInt("Temporarios: idade minima (horas)",
+    bool tempAgeChanged = ImGui::InputInt("Temporários: idade mínima (horas)",
                                           &config.tempFilesMinAgeHours);
     bool logsChanged = ImGui::InputInt("Logs mais antigos que (dias)", &config.oldLogsThresholdDays);
     bool restoreChanged =
-        ImGui::InputInt("Pontos de restauracao a manter", &config.restorePointsToKeep);
-    bool orphanChanged = ImGui::InputInt("Dados orfaos: inativos ha pelo menos (dias)",
+        ImGui::InputInt("Pontos de restauração a manter", &config.restorePointsToKeep);
+    bool orphanChanged = ImGui::InputInt("Dados órfãos: inativos há pelo menos (dias)",
                                          &config.orphanedAppsInactivityDays);
     if (tempAgeChanged || logsChanged || restoreChanged || orphanChanged) SanitizeConfig(config);
 
@@ -53,13 +53,13 @@ void DrawSettingsPanel(UiState& state) {
         SanitizeConfig(config);
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Limpeza automatica");
-    ImGui::Checkbox("Habilitar limpeza automatica", &config.autoCleanEnabled);
+    ImGui::TextUnformatted("Limpeza automática");
+    ImGui::Checkbox("Habilitar limpeza automática", &config.autoCleanEnabled);
 
     static const std::array<AutoCleanFrequency, 4> kFrequencies = {
         AutoCleanFrequency::Daily, AutoCleanFrequency::Every7Days,
         AutoCleanFrequency::Every15Days, AutoCleanFrequency::Monthly};
-    if (ImGui::BeginCombo("Frequencia", AutoCleanFrequencyName(config.autoCleanFrequency))) {
+    if (ImGui::BeginCombo("Frequência", AutoCleanFrequencyName(config.autoCleanFrequency))) {
         for (auto freq : kFrequencies) {
             bool isSelected = config.autoCleanFrequency == freq;
             if (ImGui::Selectable(AutoCleanFrequencyName(freq), isSelected))
@@ -70,7 +70,7 @@ void DrawSettingsPanel(UiState& state) {
 
     char timeBuf[8];
     std::snprintf(timeBuf, sizeof(timeBuf), "%s", config.autoCleanTimeOfDay.c_str());
-    if (ImGui::InputText("Horario (HH:MM)", timeBuf, sizeof(timeBuf)))
+    if (ImGui::InputText("Horário (HH:MM)", timeBuf, sizeof(timeBuf)))
         config.autoCleanTimeOfDay = timeBuf;
 
     static const std::array<AutoCleanMode, 2> kModes = {AutoCleanMode::AutoDelete,
@@ -80,11 +80,11 @@ void DrawSettingsPanel(UiState& state) {
             config.autoCleanMode = mode;
     }
     ImGui::TextDisabled(
-        "\"Dados orfaos\" nunca entra na limpeza automatica, mesmo com \"Excluir "
-        "automaticamente\" selecionado - exige sempre revisao manual.");
+        "\"Dados órfãos\" nunca entra na limpeza automática, mesmo com \"Excluir "
+        "automaticamente\" selecionado - exige sempre revisão manual.");
 
     ImGui::Separator();
-    if (ImGui::Button("Salvar configuracoes", ImVec2(200, 0))) SaveConfig(config);
+    if (ImGui::Button("Salvar configurações", ImVec2(200, 0))) SaveConfig(config);
 }
 
 } // namespace storagecleaner::ui

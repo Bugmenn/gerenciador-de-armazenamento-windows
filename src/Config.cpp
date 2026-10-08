@@ -33,7 +33,7 @@ const char* AutoCleanFrequencyName(AutoCleanFrequency f) {
         case AutoCleanFrequency::Daily:       return "Todo dia";
         case AutoCleanFrequency::Every7Days:  return "A cada 7 dias";
         case AutoCleanFrequency::Every15Days: return "A cada 15 dias";
-        case AutoCleanFrequency::Monthly:     return "Uma vez por mes";
+        case AutoCleanFrequency::Monthly:     return "Uma vez por mês";
     }
     return "Desconhecido";
 }
@@ -41,7 +41,7 @@ const char* AutoCleanFrequencyName(AutoCleanFrequency f) {
 const char* AutoCleanModeName(AutoCleanMode m) {
     switch (m) {
         case AutoCleanMode::AutoDelete:      return "Excluir automaticamente";
-        case AutoCleanMode::AskConfirmation: return "Mostrar e pedir confirmacao";
+        case AutoCleanMode::AskConfirmation: return "Mostrar e pedir confirmação";
     }
     return "Desconhecido";
 }
