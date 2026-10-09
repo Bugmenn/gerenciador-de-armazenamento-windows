@@ -97,4 +97,23 @@ std::wstring KnownFolderPath(const GUID& folderId);
 // usuários da máquina, não só do usuário atual.
 std::vector<std::wstring> EnumerateUserProfileDirs();
 
+struct DriveSpace {
+    std::wstring root;  // ex.: L"C:\\"
+    std::uint64_t totalBytes = 0;
+    std::uint64_t freeBytes = 0;
+    bool isRemovable = false;
+};
+
+// Unidades fixas e removíveis com mídia. Unidades de rede/ópticas ficam de
+// fora: GetDiskFreeSpaceExW nelas pode bloquear por segundos (rede caída,
+// disco girando). Mesmo assim, chamar fora da UI thread.
+std::vector<DriveSpace> EnumerateDrives();
+
+// Forma longa e absoluta de um caminho (GetFullPathNameW + GetLongPathNameW).
+// Necessária antes de comparar com a lista de pastas protegidas: %TEMP%
+// costuma vir em formato 8.3 ("C:\Users\JOAOSI~1\...") e escaparia de uma
+// comparação puramente textual com o caminho longo escolhido pelo usuário.
+// Se o caminho não existir mais, devolve só a forma absoluta.
+std::wstring CanonicalPath(const std::wstring& path);
+
 } // namespace storagecleaner::util

@@ -20,6 +20,11 @@ struct CategoryBucket {
 struct ScanResult {
     std::vector<CategoryBucket> buckets;
     std::chrono::system_clock::time_point scannedAt;
+    // Habilitadas na config, mas puladas por falta de elevação (ver
+    // IsAdminRequiredCategory).
+    std::vector<Category> skippedNeedAdmin;
+    // Varridas só em parte por falta de elevação (IsPartiallyAdminCategory).
+    std::vector<Category> partialNeedAdmin;
 
     std::uint64_t GrandTotalBytes() const {
         std::uint64_t total = 0;

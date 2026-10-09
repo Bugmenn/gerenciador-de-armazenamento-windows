@@ -39,6 +39,9 @@ struct HistoryEntry {
     std::string errorSummary;
     // true quando disparada pelo agendamento automático em vez de um clique manual.
     bool wasAutomatic = false;
+    // true quando executada com --dry-run: nada foi de fato removido, os
+    // bytes são o que *seria* liberado.
+    bool wasDryRun = false;
 };
 
 } // namespace storagecleaner

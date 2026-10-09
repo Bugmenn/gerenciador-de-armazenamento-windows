@@ -61,6 +61,10 @@ void DrawHistoryPanel(UiState& state) {
 
             ImGui::TableSetColumnIndex(2);
             ImGui::TextUnformatted(entry.wasAutomatic ? "Automática" : "Manual");
+            if (entry.wasDryRun) {
+                ImGui::SameLine();
+                ImGui::TextColored(theme::kAccentGold, "(simulação)");
+            }
 
             ImGui::TableSetColumnIndex(3);
             if (entry.success && entry.itemsSkipped == 0) {

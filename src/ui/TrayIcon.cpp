@@ -44,7 +44,13 @@ void ShowTrayBalloon(const wchar_t* title, const wchar_t* text) {
     g_iconData.uFlags = NIF_INFO;
     wcsncpy_s(g_iconData.szInfoTitle, title, _TRUNCATE);
     wcsncpy_s(g_iconData.szInfo, text, _TRUNCATE);
-    g_iconData.dwInfoFlags = NIIF_INFO;
+    // Adiar balões em "Não perturbe"/Assistente de Foco, jogo em tela cheia e
+    // apresentação é feito pelo próprio Windows para qualquer notificação.
+    // RESPECT_QUIET_TIME só descarta balões na primeira hora após o primeiro
+    // logon de um usuário novo — recomendado pela Microsoft para avisos que
+    // não são resposta a uma ação do usuário (quase todos os deste app; no
+    // "Varredura concluída" manual, perder o aviso nessa 1a hora é aceitável).
+    g_iconData.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
     ::Shell_NotifyIconW(NIM_MODIFY, &g_iconData);
     g_iconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; // restaura flags normais
 }

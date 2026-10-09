@@ -23,8 +23,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR cmdLine, int) {
     // janela abre direto minimizada na bandeja, sem interromper o login.
     std::wstring args = cmdLine ? cmdLine : L"";
     bool startMinimized = args.find(L"--startup") != std::wstring::npos;
+    bool testBalloons = args.find(L"--test-balloons") != std::wstring::npos;
+    // O teste de balões é só visual: nunca exclui nada, mesmo que o usuário
+    // clique em "Limpar" durante ele.
+    bool dryRun = testBalloons || args.find(L"--dry-run") != std::wstring::npos;
 
-    int result = storagecleaner::ui::RunApp(startMinimized);
+    int result = storagecleaner::ui::RunApp(startMinimized, dryRun, testBalloons);
 
     if (singleInstanceMutex) ::CloseHandle(singleInstanceMutex);
     return result;

@@ -11,6 +11,8 @@
 #include <d3d11.h>
 #include <tchar.h>
 
+#include <optional>
+
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
@@ -89,11 +91,35 @@ void CleanupDeviceD3D() {
     if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
 }
 
+void SaveWindowPlacementToDisk(HWND hwnd);
+
+// Só chamada por ação explícita do usuário (menu "Abrir" ou clique num balão
+// da bandeja) — o app nunca rouba o foco por conta própria.
+void ShowMainWindow(HWND hwnd) {
+    bool maximize = g_uiState && g_uiState->showMaximizedOnOpen;
+    if (g_uiState) g_uiState->showMaximizedOnOpen = false;
+    // SW_SHOW não tira uma janela do estado minimizado na barra de tarefas.
+    if (::IsIconic(hwnd))
+        ::ShowWindow(hwnd, SW_RESTORE);
+    else
+        ::ShowWindow(hwnd, maximize ? SW_SHOWMAXIMIZED : SW_SHOW);
+    ::SetForegroundWindow(hwnd);
+    if (g_uiState) g_uiState->windowVisible = true;
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
 
     switch (msg) {
+        case WM_ENDSESSION:
+            // Desligar/logoff encerra o processo sem passar pelo fim de
+            // RunApp — e, com o app na bandeja, esse é o jeito mais comum
+            // de ele terminar.
+            if (wParam) SaveWindowPlacementToDisk(hwnd);
+            return 0;
+
         case WM_SIZE:
+            if (g_uiState) g_uiState->windowMinimized = (wParam == SIZE_MINIMIZED);
             if (g_pd3dDevice != nullptr && wParam != SIZE_MINIMIZED) {
                 CleanupRenderTarget();
                 g_pSwapChain->ResizeBuffers(0, LOWORD(lParam), HIWORD(lParam),
@@ -110,14 +136,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case kTrayCallbackMessage:
             if (lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) ShowTrayContextMenu(hwnd);
+            // Clique explícito do usuário num balão (varredura agendada pronta,
+            // pouco espaço etc.): só aqui a janela vem para frente sozinha.
+            else if (lParam == NIN_BALLOONUSERCLICK) ShowMainWindow(hwnd);
             return 0;
 
         case WM_COMMAND: {
             TrayCommand cmd = HandleTrayCommand(wParam);
             if (cmd == TrayCommand::Open) {
-                ::ShowWindow(hwnd, SW_SHOW);
-                ::SetForegroundWindow(hwnd);
-                if (g_uiState) g_uiState->windowVisible = true;
+                ShowMainWindow(hwnd);
             } else if (cmd == TrayCommand::ScanNow) {
                 if (g_uiState) g_uiState->StartScan();
             } else if (cmd == TrayCommand::Exit) {
@@ -145,11 +172,64 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return ::DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+// Aplica a posição salva, se ela ainda cair em algum monitor (monitor
+// desconectado ou resolução menor deixariam a janela fora da tela).
+// Retorna false quando não aplicou e o chamador deve mostrar a janela.
+// Aplicada, ela vence o "Executar: minimizada/maximizada" de um atalho
+// (STARTUPINFO só vale no SW_SHOWDEFAULT) — a última posição real do usuário
+// é a informação mais recente.
+bool RestoreWindowPlacement(HWND hwnd, const WindowPlacement& saved, bool startHidden) {
+    if (!saved.valid) return false;
+    RECT rect{saved.x, saved.y, saved.x + saved.width, saved.y + saved.height};
+    // rcNormalPosition é em coordenadas de área de trabalho (deslocadas pela
+    // barra de tarefas no topo/esquerda) e MonitorFromRect espera tela: a
+    // checagem é aproximada, mas basta para pegar monitor desconectado,
+    // que é o caso que importa.
+    if (::MonitorFromRect(&rect, MONITOR_DEFAULTTONULL) == nullptr) return false;
+
+    WINDOWPLACEMENT wp{};
+    wp.length = sizeof(wp);
+    wp.rcNormalPosition = rect;
+    wp.showCmd = startHidden ? SW_HIDE : (saved.maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+    return ::SetWindowPlacement(hwnd, &wp) != FALSE;
+}
+
+std::optional<WindowPlacement> CaptureWindowPlacement(HWND hwnd, bool pendingMaximize) {
+    WINDOWPLACEMENT wp{};
+    wp.length = sizeof(wp);
+    if (!::GetWindowPlacement(hwnd, &wp)) return std::nullopt;
+
+    WindowPlacement placement;
+    placement.valid = true;
+    placement.x = wp.rcNormalPosition.left;
+    placement.y = wp.rcNormalPosition.top;
+    placement.width = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
+    placement.height = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
+    // IsZoomed lê o estilo WS_MAXIMIZE, que continua valendo com a janela
+    // escondida na bandeja; minimizada, vale o "restaurar para maximizada".
+    placement.maximized = pendingMaximize || ::IsZoomed(hwnd) ||
+                          (::IsIconic(hwnd) && (wp.flags & WPF_RESTORETOMAXIMIZED));
+    return placement;
+}
+
+void SaveWindowPlacementToDisk(HWND hwnd) {
+    auto placement = CaptureWindowPlacement(hwnd, g_uiState && g_uiState->showMaximizedOnOpen);
+    if (!placement) return;
+    // Só este campo vai para o disco (edições não salvas das Configurações
+    // continuam não salvas), e nunca por cima de um config.json ilegível.
+    if (auto onDisk = TryLoadConfig()) {
+        onDisk->window = *placement;
+        SaveConfig(*onDisk);
+    }
+}
+
 } // namespace
 
-int RunApp(bool startMinimized) {
+int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
     UiState state;
     state.config = LoadConfig();
+    state.dryRun = dryRun;
+    state.testBalloons = testBalloons;
     g_uiState = &state;
 
     HINSTANCE hInstance = ::GetModuleHandleW(nullptr);
@@ -178,7 +258,12 @@ int RunApp(bool startMinimized) {
         return 1;
     }
 
-    ::ShowWindow(hwnd, startMinimized ? SW_HIDE : SW_SHOWDEFAULT);
+    if (!RestoreWindowPlacement(hwnd, state.config.window, startMinimized))
+        ::ShowWindow(hwnd, startMinimized ? SW_HIDE : SW_SHOWDEFAULT);
+    // Com --startup a janela nasce escondida; SetWindowPlacement com SW_HIDE
+    // não guarda "maximizada", então o primeiro "Abrir" da bandeja aplica.
+    state.showMaximizedOnOpen = startMinimized && state.config.window.valid &&
+                                state.config.window.maximized;
     ::UpdateWindow(hwnd);
     state.windowVisible = !startMinimized;
 
@@ -187,6 +272,10 @@ int RunApp(bool startMinimized) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
+    // A janela ImGui é fixa (ocupa a área cliente inteira), então o
+    // imgui.ini não teria nada útil — e o padrão o grava na pasta de
+    // trabalho, ao lado do .exe. Posição/tamanho reais vão no config.json.
+    io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
     ApplyTheme();
@@ -237,6 +326,8 @@ int RunApp(bool startMinimized) {
         ImGui::PushFont(state.fonts.hero);
         ImGui::TextUnformatted("Otimizador de Armazenamento");
         ImGui::PopFont();
+        if (state.dryRun)
+            ImGui::TextColored(theme::kAccentGold, "MODO SIMULAÇÃO - nada será excluído");
         {
             LightScanTotals headerTotals = state.GetLightTotals();
             std::uint64_t detectable = headerTotals.recycleBinBytes + headerTotals.tempBytes;
@@ -279,6 +370,8 @@ int RunApp(bool startMinimized) {
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+
+    SaveWindowPlacementToDisk(hwnd);
 
     RemoveTrayIcon();
     CleanupDeviceD3D();

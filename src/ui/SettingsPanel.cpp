@@ -1,11 +1,15 @@
+#include "FileDialogs.h"
 #include "Panels.h"
+#include "Theme.h"
 #include "TrayIcon.h"
 #include "storagecleaner/ConfigStore.h"
+#include "storagecleaner/Utils.h"
 
 #include <imgui.h>
 
 #include <algorithm>
 #include <array>
+#include <optional>
 
 namespace storagecleaner::ui {
 
@@ -37,6 +41,60 @@ void DrawSettingsPanel(UiState& state) {
     bool orphanChanged = ImGui::InputInt("Dados órfãos: inativos há pelo menos (dias)",
                                          &config.orphanedAppsInactivityDays);
     if (tempAgeChanged || logsChanged || restoreChanged || orphanChanged) SanitizeConfig(config);
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Alerta de pouco espaço");
+    ImGui::Checkbox("Avisar na bandeja quando uma unidade estiver quase cheia",
+                    &config.lowDiskAlertEnabled);
+    ImGui::BeginDisabled(!config.lowDiskAlertEnabled);
+    if (ImGui::InputInt("Avisar abaixo de (% livre)", &config.lowDiskAlertPercent))
+        SanitizeConfig(config);
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Pastas protegidas (nunca entram na limpeza)");
+    ImGui::TextDisabled("Uma pasta que contenha uma pasta protegida também não é oferecida.");
+    std::optional<std::size_t> toRemove;
+    for (std::size_t i = 0; i < config.excludedPaths.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::SmallButton("Remover")) toRemove = i;
+        ImGui::SameLine();
+        ImGui::TextUnformatted(util::WideToUtf8(config.excludedPaths[i]).c_str());
+        ImGui::PopID();
+    }
+    bool exclusionsChanged = false;
+    if (toRemove) {
+        config.excludedPaths.erase(config.excludedPaths.begin() + *toRemove);
+        exclusionsChanged = true;
+    }
+    if (config.excludedPaths.empty()) ImGui::TextColored(theme::kTextMuted, "Nenhuma pasta protegida.");
+    if (ImGui::Button("Adicionar pasta...")) {
+        if (auto folder = PickFolder()) {
+            config.excludedPaths.push_back(*folder);
+            SanitizeConfig(config); // descarta duplicata
+            state.ApplyExclusionsToLastResult();
+            exclusionsChanged = true;
+        }
+    }
+    if (exclusionsChanged) {
+        // Salva na hora, e só esta lista: esquecer o "Salvar" aqui faria a
+        // proteção sumir no próximo início (inclusive na limpeza automática),
+        // e as demais edições ainda não salvas continuam pendentes.
+        // Nunca por cima de um config.json ilegível (perderia o resto da
+        // config do usuário); nesse caso só vale até fechar o app, e avisa.
+        auto onDisk = TryLoadConfig();
+        state.exclusionsSaveFailed = !onDisk.has_value();
+        if (onDisk) {
+            onDisk->excludedPaths = config.excludedPaths;
+            SaveConfig(*onDisk);
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(salvo automaticamente)");
+    if (state.exclusionsSaveFailed)
+        ImGui::TextColored(theme::kWarning,
+                           "Não foi possível ler o config.json atual: as pastas protegidas valem só "
+                           "até fechar o app. Use \"Salvar configurações\" para regravar o arquivo.");
 
     ImGui::Separator();
     ImGui::TextUnformatted("Segundo plano");
@@ -84,7 +142,10 @@ void DrawSettingsPanel(UiState& state) {
         "automaticamente\" selecionado - exige sempre revisão manual.");
 
     ImGui::Separator();
-    if (ImGui::Button("Salvar configurações", ImVec2(200, 0))) SaveConfig(config);
+    if (ImGui::Button("Salvar configurações", ImVec2(200, 0))) {
+        SaveConfig(config);
+        state.exclusionsSaveFailed = false;
+    }
 }
 
 } // namespace storagecleaner::ui

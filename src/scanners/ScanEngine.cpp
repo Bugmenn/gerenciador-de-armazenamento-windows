@@ -1,14 +1,51 @@
+#include "storagecleaner/PathExclusion.h"
 #include "storagecleaner/RecycleBinOps.h"
 #include "storagecleaner/Scanner.h"
 #include "storagecleaner/Utils.h"
+#include "storagecleaner/VssRestorePoints.h"
 
 #include <windows.h>
+
+#include <iterator>
 
 namespace storagecleaner {
 
 namespace {
 
-void AddBucket(ScanResult& result, Category category, std::vector<ScanItem>&& items) {
+using ScannerFn = std::vector<ScanItem> (*)(const Config&, ProgressChannel&, std::atomic<bool>&);
+
+struct ScannerEntry {
+    Category category;
+    ScannerFn scan;
+};
+
+// Ordem de execução das varreduras (a mesma exibida nos Resultados).
+constexpr ScannerEntry kScanners[] = {
+    {Category::TempFiles, ScanTempFiles},
+    {Category::BrowserCache, ScanBrowserCache},
+    {Category::Duplicate, ScanDuplicates},
+    {Category::OldLogs, ScanOldLogs},
+    {Category::RecycleBin, ScanRecycleBin},
+    {Category::RestorePoints, ScanRestorePoints},
+    {Category::OrphanedApps, ScanOrphanedAppData},
+    {Category::WindowsUpdateCache, ScanWindowsUpdateCache},
+    {Category::CrashDumps, ScanCrashDumps},
+    {Category::ThumbnailCache, ScanThumbnailCache},
+};
+constexpr bool ScannersMatchCategories() {
+    if (std::size(kScanners) != std::size(kAllCategories)) return false;
+    for (std::size_t i = 0; i < std::size(kScanners); ++i)
+        if (kScanners[i].category != kAllCategories[i]) return false;
+    return true;
+}
+static_assert(ScannersMatchCategories(),
+              "kScanners precisa de exatamente um scanner por categoria, na ordem de kAllCategories");
+
+void AddBucket(ScanResult& result, Category category, std::vector<ScanItem>&& items,
+               const std::vector<std::wstring>& excludedPaths) {
+    // Ponto único antes de qualquer item chegar à UI ou à limpeza: um scanner
+    // novo não precisa lembrar de respeitar a lista de exclusões.
+    RemoveProtectedItems(items, excludedPaths);
     if (items.empty()) return;
     CategoryBucket bucket;
     bucket.category = category;
@@ -18,6 +55,20 @@ void AddBucket(ScanResult& result, Category category, std::vector<ScanItem>&& it
 }
 
 } // namespace
+
+void RemoveProtectedItems(std::vector<ScanItem>& items, const std::vector<std::wstring>& excludedPaths) {
+    if (excludedPaths.empty() || items.empty()) return;
+    std::vector<std::wstring> canonicalExcluded;
+    canonicalExcluded.reserve(excludedPaths.size());
+    for (const auto& p : excludedPaths) canonicalExcluded.push_back(util::CanonicalPath(p));
+
+    std::erase_if(items, [&](const ScanItem& item) {
+        // Testa a forma como o scanner achou e a canônica: a primeira cobre
+        // itens que não existem mais em disco, a segunda nomes 8.3.
+        return IsExcludedPath(item.path, item.isDirectory, canonicalExcluded) ||
+               IsExcludedPath(util::CanonicalPath(item.path), item.isDirectory, canonicalExcluded);
+    });
+}
 
 void ScanEngine::RunAsync(const Config& config, ProgressChannel& progress) {
     if (running_.load()) return; // uma varredura já em andamento; UI deve desabilitar o botão
@@ -35,24 +86,19 @@ void ScanEngine::RunAsync(const Config& config, ProgressChannel& progress) {
             return it == config.perCategory.end() || it->second.enabled;
         };
 
-        if (enabled(Category::TempFiles) && !cancelRequested_.load())
-            AddBucket(result, Category::TempFiles, ScanTempFiles(config, progress, cancelRequested_));
-        if (enabled(Category::BrowserCache) && !cancelRequested_.load())
-            AddBucket(result, Category::BrowserCache,
-                     ScanBrowserCache(config, progress, cancelRequested_));
-        if (enabled(Category::Duplicate) && !cancelRequested_.load())
-            AddBucket(result, Category::Duplicate, ScanDuplicates(config, progress, cancelRequested_));
-        if (enabled(Category::OldLogs) && !cancelRequested_.load())
-            AddBucket(result, Category::OldLogs, ScanOldLogs(config, progress, cancelRequested_));
-        if (enabled(Category::RecycleBin) && !cancelRequested_.load())
-            AddBucket(result, Category::RecycleBin,
-                     ScanRecycleBin(config, progress, cancelRequested_));
-        if (enabled(Category::RestorePoints) && !cancelRequested_.load())
-            AddBucket(result, Category::RestorePoints,
-                     ScanRestorePoints(config, progress, cancelRequested_));
-        if (enabled(Category::OrphanedApps) && !cancelRequested_.load())
-            AddBucket(result, Category::OrphanedApps,
-                     ScanOrphanedAppData(config, progress, cancelRequested_));
+        const bool elevated = IsRunningElevated();
+        for (const ScannerEntry& scanner : kScanners) {
+            if (cancelRequested_.load()) break;
+            if (!enabled(scanner.category)) continue;
+            if (IsAdminRequiredCategory(scanner.category) && !elevated) {
+                result.skippedNeedAdmin.push_back(scanner.category);
+                continue;
+            }
+            if (IsPartiallyAdminCategory(scanner.category) && !elevated)
+                result.partialNeedAdmin.push_back(scanner.category);
+            AddBucket(result, scanner.category, scanner.scan(config, progress, cancelRequested_),
+                      config.excludedPaths);
+        }
 
         ProgressSnapshot finalSnapshot;
         finalSnapshot.phase = cancelRequested_.load() ? Phase::Cancelled : Phase::Done;
@@ -93,6 +139,7 @@ LightScanTotals RunLightBackgroundScan() {
     // Dashboard atualizado sem competir por I/O com o uso normal da máquina.
     LightScanTotals totals;
     totals.recycleBinBytes = QueryRecycleBinSizeBytes();
+    totals.drives = util::EnumerateDrives();
 
     if (wchar_t tempPath[MAX_PATH]; ::GetTempPathW(MAX_PATH, tempPath) > 0) {
         // A varredura leve não tem um cancelamento real acionável pelo

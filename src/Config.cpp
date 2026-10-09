@@ -1,4 +1,7 @@
 #include "storagecleaner/Config.h"
+#include "storagecleaner/PathExclusion.h"
+
+#include <algorithm>
 
 namespace storagecleaner {
 
@@ -26,6 +29,29 @@ void SanitizeConfig(Config& config) {
     // I/O real (Shell API + soma recursiva de %TEMP%), entao um intervalo
     // muito baixo faria essa thread disparar quase sem parar.
     if (config.backgroundScanIntervalMinutes < 5) config.backgroundScanIntervalMinutes = 5;
+    // Uma janela menor que isso (config.json editado à mão) deixaria a UI
+    // ilegível; melhor voltar ao tamanho padrão. Limite baixo de propósito:
+    // o app não é DPI-aware, então em escala 125-150% as coordenadas salvas
+    // são lógicas e bem menores que os pixels físicos na tela.
+    // Teto: coordenadas de janela do Win32 cabem em ~±32k, e x + width é
+    // somado em int ao montar o RECT.
+    const WindowPlacement& w = config.window;
+    if (w.valid && (w.width < 400 || w.height < 300 || w.width > 32767 || w.height > 32767 ||
+                    w.x < -32768 || w.x > 32767 || w.y < -32768 || w.y > 32767))
+        config.window.valid = false;
+    config.lowDiskAlertPercent = std::clamp(config.lowDiskAlertPercent, 1, 50);
+
+    // Entradas vazias não excluiriam nada e duplicadas só poluem a lista.
+    std::vector<std::wstring> uniquePaths;
+    for (const auto& path : config.excludedPaths) {
+        std::wstring key = NormalizePathForCompare(path);
+        if (key.empty()) continue;
+        bool seen = std::any_of(uniquePaths.begin(), uniquePaths.end(), [&](const std::wstring& p) {
+            return NormalizePathForCompare(p) == key;
+        });
+        if (!seen) uniquePaths.push_back(path);
+    }
+    config.excludedPaths = std::move(uniquePaths);
 }
 
 const char* AutoCleanFrequencyName(AutoCleanFrequency f) {

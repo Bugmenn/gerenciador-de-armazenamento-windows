@@ -12,6 +12,8 @@
 #include <chrono>
 #include <mutex>
 #include <optional>
+#include <set>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -60,8 +62,28 @@ struct UiState {
     mutable std::mutex lightScanMutex;
     LightScanTotals lightTotals;
     std::chrono::steady_clock::time_point lastLightScan{};
+    // Sinalizado pela worker da varredura leve; Tick() consome e roda o
+    // alerta de disco cheio na UI thread.
+    std::atomic<bool> lightScanFresh{false};
+    // Unidades já avisadas por pouco espaço — evita repetir o balão a cada
+    // varredura leve enquanto a unidade continua cheia.
+    std::set<std::wstring> lowDiskAlerted;
     std::chrono::system_clock::time_point lastAutoCleanCheck{};
     bool windowVisible = true;
+    // true quando o app subiu escondido (--startup) e a última sessão terminou
+    // maximizada: o primeiro "Abrir" da bandeja abre maximizado (ver App.cpp).
+    bool showMaximizedOnOpen = false;
+    // Minimizada na barra de tarefas (WM_SIZE em App.cpp). Junto com
+    // !windowVisible (escondida na bandeja), decide se o fim de uma varredura
+    // manual merece balão.
+    bool windowMinimized = false;
+    // --test-balloons: enfileira cada tipo de balão uma vez (EnqueueBalloonTest)
+    // e deixa o agendamento parado; main.cpp também liga dryRun junto.
+    bool testBalloons = false;
+    bool balloonTestQueued = false;
+    // A última gravação automática das pastas protegidas foi pulada porque o
+    // config.json existente estava ilegível (ver SettingsPanel).
+    bool exclusionsSaveFailed = false;
     bool requestExit = false;
     // Populado uma unica vez em RunApp() (App.cpp) via Theme::LoadFonts(),
     // depois de ImGui::CreateContext() — os paineis so leem, nunca escrevem.
@@ -77,8 +99,13 @@ struct UiState {
     // Tick() mostra um balão na bandeja quando ela terminar, já que nesse
     // fluxo o usuário pode nem estar olhando para a janela.
     bool autoCleanNotifyArmed = false;
+    // Último disparo do agendador nesta execução do app (ver ShouldRunAutoClean).
+    std::optional<std::chrono::system_clock::time_point> lastAutoCleanTrigger;
 
     int activeTab = 0;
+    // Definido uma vez em RunApp() a partir de --dry-run; repassado a
+    // CleanItems() em toda limpeza (manual ou automática).
+    bool dryRun = false;
 
     void StartScan(bool triggeredByAutoClean = false);
     void StartClean(const std::vector<ScanItem>& selected, bool automatic);
@@ -86,6 +113,12 @@ struct UiState {
     // threads e roda o timer de agendamento. Mantém toda a lógica de estado
     // fora dos arquivos *Panel.cpp, que só desenham.
     void Tick();
+    void CheckLowDiskAlert();
+    void EnqueueBalloonTest();
+    // Tira do resultado já exibido o que passou a estar protegido depois da
+    // varredura, para a revisão e o modal de confirmação não mostrarem itens
+    // que a limpeza vai descartar.
+    void ApplyExclusionsToLastResult();
 
     std::vector<ScanItem> CollectSelectedItems() const;
 

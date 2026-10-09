@@ -70,6 +70,14 @@ void DrawResultsPanel(UiState& state) {
     UiState::SelectionSummary selection = state.GetSelectionSummary();
     std::uint64_t selectedBytes = selection.bytes;
 
+    for (Category skipped : state.lastScanResult.skippedNeedAdmin)
+        ImGui::TextColored(theme::kWarning, "%s: não verificado - requer executar como Administrador.",
+                           CategoryName(skipped));
+    for (Category partial : state.lastScanResult.partialNeedAdmin)
+        ImGui::TextColored(theme::kWarning,
+                           "%s: só os itens do usuário - os do sistema exigem executar como Administrador.",
+                           CategoryName(partial));
+
     for (std::size_t i = 0; i < state.lastScanResult.buckets.size(); ++i) {
         const CategoryBucket& bucket = state.lastScanResult.buckets[i];
         std::string header = std::string(CategoryName(bucket.category)) + " (" +
@@ -90,8 +98,11 @@ void DrawResultsPanel(UiState& state) {
                               ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("Isso vai remover %zu item(ns), liberando %s.", selection.count,
                    util::FormatSize(selection.bytes).c_str());
-        ImGui::TextUnformatted("Arquivos temporários, cache, duplicados, logs e dados órfãos vão"
-                              " para a Lixeira (podem ser restaurados).");
+        ImGui::TextUnformatted("Os itens vão para a Lixeira e podem ser restaurados, exceto as "
+                              "categorias marcadas como permanentes.");
+        if (state.dryRun)
+            ImGui::TextColored(theme::kAccentGold,
+                              "Modo simulação: nada será excluído, só registrado no histórico.");
         if (selection.anyPermanent)
             ImGui::TextColored(theme::kDanger,
                               "Atenção: Lixeira e/ou pontos de restauração selecionados serão "
@@ -125,7 +136,10 @@ void DrawResultsPanel(UiState& state) {
         std::lock_guard<std::mutex> lock(state.cleanResultMutex);
         if (state.pendingCleanResult.has_value()) {
             const HistoryEntry& entry = *state.pendingCleanResult;
-            if (entry.success)
+            if (entry.success && entry.wasDryRun)
+                ImGui::TextColored(theme::kAccentGold, "Simulação concluída: %s seriam liberados.",
+                                  util::FormatSize(entry.totalBytesFreed).c_str());
+            else if (entry.success)
                 ImGui::TextColored(theme::kSuccess, "Limpeza concluída: %s liberados.",
                                   util::FormatSize(entry.totalBytesFreed).c_str());
             else

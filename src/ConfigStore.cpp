@@ -43,6 +43,7 @@ CategoryConfig CategoryConfigFromJson(const json& j) {
 json ToJson(const Config& config) {
     json j;
     j["minFileSizeBytes"] = config.minFileSizeBytes;
+    j["tempFilesMinAgeHours"] = config.tempFilesMinAgeHours;
     j["oldLogsThresholdDays"] = config.oldLogsThresholdDays;
     j["restorePointsToKeep"] = config.restorePointsToKeep;
     j["orphanedAppsInactivityDays"] = config.orphanedAppsInactivityDays;
@@ -55,6 +56,19 @@ json ToJson(const Config& config) {
     for (const auto& [category, cc] : config.perCategory)
         perCategory[CategoryKey(category)] = ToJson(cc);
     j["perCategory"] = perCategory;
+
+    j["excludedPaths"] = json::array();
+    for (const auto& p : config.excludedPaths) j["excludedPaths"].push_back(util::WideToUtf8(p));
+    j["lowDiskAlertEnabled"] = config.lowDiskAlertEnabled;
+    j["lowDiskAlertPercent"] = config.lowDiskAlertPercent;
+
+    if (config.window.valid) {
+        j["window"] = {{"x", config.window.x},
+                       {"y", config.window.y},
+                       {"width", config.window.width},
+                       {"height", config.window.height},
+                       {"maximized", config.window.maximized}};
+    }
 
     j["startWithWindows"] = config.startWithWindows;
     j["minimizeToTrayOnClose"] = config.minimizeToTrayOnClose;
@@ -70,6 +84,7 @@ json ToJson(const Config& config) {
 Config ConfigFromJson(const json& j) {
     Config config = Config::Defaults();
     config.minFileSizeBytes = j.value("minFileSizeBytes", config.minFileSizeBytes);
+    config.tempFilesMinAgeHours = j.value("tempFilesMinAgeHours", config.tempFilesMinAgeHours);
     config.oldLogsThresholdDays = j.value("oldLogsThresholdDays", config.oldLogsThresholdDays);
     config.restorePointsToKeep = j.value("restorePointsToKeep", config.restorePointsToKeep);
     config.orphanedAppsInactivityDays =
@@ -86,6 +101,37 @@ Config ConfigFromJson(const json& j) {
             Category category;
             if (CategoryFromKey(key, category))
                 config.perCategory[category] = CategoryConfigFromJson(value);
+        }
+    }
+
+    if (j.contains("excludedPaths")) {
+        for (const auto& p : j["excludedPaths"])
+            if (p.is_string()) config.excludedPaths.push_back(util::Utf8ToWide(p.get<std::string>()));
+    }
+    config.lowDiskAlertEnabled = j.value("lowDiskAlertEnabled", config.lowDiskAlertEnabled);
+    config.lowDiskAlertPercent = j.value("lowDiskAlertPercent", config.lowDiskAlertPercent);
+
+    // Um tipo errado aqui (ex.: "x" como texto) só invalida a janela — sem o
+    // try local, o type_error derrubaria a config inteira para os padrões.
+    if (j.contains("window") && j["window"].is_object()) {
+        try {
+            const json& w = j["window"];
+            // Lido como int64 e só convertido se couber nas coordenadas do
+            // Win32 (~±32k): converter direto para int um número enorme é UB.
+            auto coord = [&w](const char* key, bool& ok) {
+                std::int64_t v = w.value(key, std::int64_t{0});
+                if (v < -32768 || v > 32767) ok = false;
+                return ok ? static_cast<int>(v) : 0;
+            };
+            bool ok = true;
+            config.window.x = coord("x", ok);
+            config.window.y = coord("y", ok);
+            config.window.width = coord("width", ok);
+            config.window.height = coord("height", ok);
+            config.window.maximized = w.value("maximized", false);
+            config.window.valid = ok; // SanitizeConfig descarta tamanho pequeno demais
+        } catch (const json::exception&) {
+            config.window = WindowPlacement{};
         }
     }
 
@@ -110,20 +156,26 @@ Config ConfigFromJson(const json& j) {
 
 } // namespace
 
-Config LoadConfig() {
+std::optional<Config> TryLoadConfig() {
     fs::path path = ConfigPath();
-    std::ifstream in(path);
-    if (!in.is_open()) return Config::Defaults();
+    std::error_code ec;
+    if (!fs::exists(path, ec) && !ec) return Config::Defaults();
 
+    std::ifstream in(path);
+    if (!in.is_open()) return std::nullopt;
     try {
         json j;
         in >> j;
         return ConfigFromJson(j);
     } catch (const std::exception&) {
-        // Arquivo corrompido ou de uma versão incompatível: preferimos cair
-        // para os padrões a impedir o app de abrir.
-        return Config::Defaults();
+        return std::nullopt;
     }
+}
+
+Config LoadConfig() {
+    // Arquivo corrompido ou de uma versão incompatível: preferimos cair para
+    // os padrões a impedir o app de abrir.
+    return TryLoadConfig().value_or(Config::Defaults());
 }
 
 void SaveConfig(const Config& config) {
@@ -138,6 +190,10 @@ void SaveConfig(const Config& config) {
     {
         std::ofstream out(tmpPath);
         out << ToJson(config).dump(2);
+        out.flush();
+        // Disco cheio/erro de escrita: um .tmp incompleto não pode substituir
+        // o config.json bom.
+        if (!out) return;
     }
     // Escrita atômica: grava em arquivo temporário e só então substitui o
     // arquivo final, para nunca deixar um config.json truncado se o processo

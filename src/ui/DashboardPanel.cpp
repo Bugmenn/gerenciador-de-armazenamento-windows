@@ -4,6 +4,8 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 namespace storagecleaner::ui {
 
 void DrawDashboardPanel(UiState& state) {
@@ -48,6 +50,37 @@ void DrawDashboardPanel(UiState& state) {
     LightScanTotals lightTotals = state.GetLightTotals();
     ImGui::Text("Lixeira: %s", util::FormatSize(lightTotals.recycleBinBytes).c_str());
     ImGui::Text("Temporários (usuário atual): %s", util::FormatSize(lightTotals.tempBytes).c_str());
+
+    if (!lightTotals.drives.empty()) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Unidades:");
+        const float gaugeRadius = 22.0f;
+        for (std::size_t i = 0; i < lightTotals.drives.size(); ++i) {
+            const util::DriveSpace& drive = lightTotals.drives[i];
+            std::uint64_t used = drive.totalBytes - std::min(drive.freeBytes, drive.totalBytes);
+            float usedFraction = static_cast<float>(static_cast<double>(used) /
+                                                    static_cast<double>(drive.totalBytes));
+            bool low = state.config.lowDiskAlertEnabled && !drive.isRemovable &&
+                       (1.0f - usedFraction) * 100.0f < static_cast<float>(state.config.lowDiskAlertPercent);
+            ImU32 fill = ImGui::ColorConvertFloat4ToU32(low ? theme::kDanger : theme::kAccentBlue);
+            ImU32 fillEnd = ImGui::ColorConvertFloat4ToU32(low ? theme::kDanger : theme::kAccentGold);
+
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::BeginGroup();
+            DrawInlineCircularGauge(gaugeRadius, 5.0f, usedFraction, fill, fillEnd,
+                                    ImGui::ColorConvertFloat4ToU32(theme::kBorder));
+            ImGui::EndGroup();
+            ImGui::SameLine();
+            ImGui::BeginGroup();
+            ImGui::Text("%s%s", util::WideToUtf8(drive.root).c_str(),
+                        drive.isRemovable ? " (removível)" : "");
+            ImGui::TextColored(low ? theme::kDanger : theme::kTextMuted, "%s livres de %s",
+                               util::FormatSize(drive.freeBytes).c_str(),
+                               util::FormatSize(drive.totalBytes).c_str());
+            ImGui::EndGroup();
+            ImGui::PopID();
+        }
+    }
 }
 
 } // namespace storagecleaner::ui

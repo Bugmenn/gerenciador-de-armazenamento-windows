@@ -11,6 +11,44 @@ foi feito — decisões e causas raiz que valem para a próxima sessão vão par
 
 ## Registro de Atividades Recentes
 
+### [2026-10-08] Balão no fim de varredura manual + fila de balões + modo --test-balloons
+**O que foi feito:** O usuário não viu notificação ao escanear pela tela/bandeja com a janela fechada — por design só havia balão para varredura agendada, limpeza automática e pouco espaço (a instrução de teste dada antes estava errada). Agora: varredura manual concluída com a janela escondida ou minimizada avisa (inclusive "nada para limpar"; cancelada não); agendada também avisa com a janela minimizada; textos centralizados em `src/ui/Notifications.cpp`; **fila de balões** com 8 s entre eles (um `Shell_NotifyIcon` substitui o anterior — a regra antiga "um por Tick" não protegia o anterior, apontado pelas 2 revisões); `--test-balloons` enfileira os 6 tipos com "[Teste n/6]", liga `--dry-run` junto e para o agendador. Validado: Escanear agora com janela escondida 60 s sem foco/sem crash; teste de balões 55 s sem crash; config.json do usuário (criado pela sessão dele) com backup e restaurado com hash idêntico. **Pendente: o usuário vai rodar `--test-balloons` e os fluxos reais e reportar se os balões aparecem** (esta sessão não vê a área de trabalho).
+**Arquivos alterados:**
+- `src/ui/Notifications.{h,cpp}` *(novos)*
+- `src/ui/UiState.{cpp,h}` — balão manual, `windowMinimized`, fila, teste
+- `src/ui/App.{cpp,h}`, `src/main.cpp` — `WM_SIZE` minimizado, flag `--test-balloons`
+- `src/ui/TrayIcon.cpp` — comentário do quiet time; `CMakeLists.txt`, `README.md`, `CLAUDE.md`
+
+### [2026-10-08] Agendamento "pedir confirmação" avisa por balão em vez de abrir a janela
+**O que foi feito:** O código marcava `windowVisible = true` sem `ShowWindow` (a janela nunca aparecia; renderizava escondida). Em vez de corrigir para abrir a janela, o usuário decidiu que processos automáticos **nunca** devem roubar o foco (pode estar jogando/digitando/apresentando) — virou padrão no CLAUDE.md e memória do agente. Agora: balão "Varredura agendada concluída" (só se achou algo e a janela não estiver aberta); clique no balão (`NIN_BALLOONUSERCLICK`) → `ShowMainWindow` (extraído do "Abrir", restaura minimizada); no máximo um balão por `Tick()`; `NIIF_RESPECT_QUIET_TIME` (a revisão corrigiu a documentação: o adiamento em tela cheia/Não perturbe é do próprio Windows, o flag só cobre a 1ª hora após o primeiro logon). Validado: 30 s com agendamento vencido sem janela visível nem foco; clique simulado abre e restaura minimizada. Não verificável aqui: clique físico num toast real do Windows 11 dando foco.
+**Arquivos alterados:**
+- `src/ui/App.cpp` — `ShowMainWindow`, `NIN_BALLOONUSERCLICK`, `SW_RESTORE`
+- `src/ui/UiState.cpp` — balão em vez de `windowVisible`, um balão por Tick
+- `src/ui/TrayIcon.cpp` — `NIIF_RESPECT_QUIET_TIME`
+- `include/storagecleaner/Config.h`, `README.md`, `CLAUDE.md`
+
+### [2026-10-08] imgui.ini deixa de ser criado; posição/tamanho da janela lembrados no config.json
+**O que foi feito:** O usuário notou um `imgui.ini` ao lado do `.exe` ao fechar (padrão do Dear ImGui, relativo à pasta de trabalho; inútil porque a janela ImGui é fixa). Escolheu desligar o arquivo e lembrar a janela. `io.IniFilename = nullptr`; `Config::window` (`WindowPlacement`) gravado só ao sair (LoadConfig → campo → SaveConfig, sem persistir edições não salvas), restaurado via `SetWindowPlacement` se cair em algum monitor; `--startup` + maximizado aplica no primeiro "Abrir" da bandeja. App não é DPI-aware: coordenadas salvas são lógicas (125% → 900x600 físico = 720x480), por isso o mínimo do `SanitizeConfig` é 400x300. Validado na máquina real (ida-e-volta posição/maximizado, x=-50000 cai no padrão, início escondido mantém maximizado, nenhum imgui.ini criado). Apagados os 2 `imgui.ini` antigos (raiz do repo e `out\build\x64-Debug`). Revisão final (2 revisores, 1 cego), corrigidos: gravação também em `WM_ENDSESSION` (desligar/logoff não passa pelo fim de `RunApp`); `TryLoadConfig()` — regravar um campo (janela, pastas protegidas) nunca sobrescreve um config.json ilegível (antes trocaria a config do usuário pelos padrões); tipo errado em "window" só invalida a janela; teto ±32767 nas coordenadas; `SaveConfig` não troca o arquivo se a escrita do .tmp falhar. Validados: arquivo corrompido fica com hash idêntico, `"x":"abc"` preserva o resto da config, `WM_ENDSESSION` simulado grava. Achado fora do escopo, não corrigido: `UiState.cpp` (auto-clean "pedir confirmação") marca `windowVisible = true` sem `ShowWindow` — a janela não aparece de fato.
+**Arquivos alterados:**
+- `src/ui/App.cpp` — IniFilename nulo, `RestoreWindowPlacement`/`CaptureWindowPlacement`, gravação ao sair, "Abrir" maximizado
+- `include/storagecleaner/Config.h`, `src/Config.cpp`, `src/ConfigStore.cpp`, `include/storagecleaner/ConfigStore.h` — `WindowPlacement`, limites, JSON "window", `TryLoadConfig`, escrita conferida
+- `src/ui/UiState.h`, `src/ui/SettingsPanel.cpp` — `showMaximizedOnOpen`, `exclusionsSaveFailed` + aviso
+- `README.md` — persistência
+- Removido: `imgui.ini` (raiz) e `out/build/x64-Debug/imgui.ini` (gerados, ignorados pelo git)
+
+### [2026-10-08] Fases 0 e 1 do plano de novas funções (dry-run, 3 categorias, unidades, alerta, pastas protegidas)
+**O que foi feito:** O usuário pediu ideias de funções e aprovou um plano em 5 fases (0 a 4; plano em `~/.claude/plans/monte-ideias-para-adicionar-fizzy-whale.md`). Esta entrega cobre as Fases 0 e 1. Fase 0: `--dry-run` (guarda única em `CleanItems`; `HistoryEntry::wasDryRun`; simulação não adia a limpeza real); `ScanEngine` com tabela `kScanners` + `static_assert` de ordem/quantidade; `IsAdminRequiredCategory`/`IsPartiallyAdminCategory` + avisos nos Resultados. Fase 1: categorias Cache do Windows Update, Despejos/relatórios de erro e Cache de miniaturas; painel de unidades (enumeradas na worker da varredura leve); alerta de pouco espaço (balão único, com rearme); pastas protegidas (`PathExclusion`, lógica pura testada, canonização 8.3 no lado Win32, filtro no `ScanEngine` e de novo na worker da limpeza, salvas na hora). Revisão final: 2 revisores (1 cego), 14 achados. Corrigidos: brecha 8.3, loop do agendador a cada 60 s (afetava também o modo "pedir confirmação" sem dry-run), miniaturas bloqueadas, MEMORY.DMP sem elevação, balões sobrepostos, proteção que se perdia sem "Salvar", acento na comparação de caminhos, `static_assert` fraco, código morto. Também corrigidos 2 defeitos anteriores: `tempFilesMinAgeHours` não era persistido e o `%TEMP%` do usuário atual era varrido duas vezes (total dobrado). Build Debug 0 erros/0 warnings, ctest 3/3, app sobe em `--dry-run`. A UI não pôde ser vista daqui (a tool PowerShell não captura a janela DX11). Pendente: validação visual pelo usuário, decisão sobre as categorias novas ligadas por padrão para quem já usa o app, Fases 2 a 4.
+**Arquivos alterados:**
+- `include/storagecleaner/{Cleaner,Config,HistoryEntry,ProgressState,ScanItem,ScanResult,Scanner,Utils}.h`: flag dry-run, campos novos, categorias, fases, `CanonicalPath`/`EnumerateDrives`, `RemoveProtectedItems`
+- `src/{Config,ConfigStore,HistoryStore,ProgressState,Utils}.cpp`, `src/cleaner/Cleaner.cpp`, `src/main.cpp`
+- `src/scanners/{ScanEngine,TempFilesScanner,RestorePointsScanner}.cpp`
+- `src/ui/{App,DashboardPanel,HistoryPanel,ResultsPanel,SettingsPanel,UiState}.cpp`, `src/ui/{App,UiState}.h`
+- `include/storagecleaner/PathExclusion.h`, `src/PathExclusion.cpp` *(novos)*
+- `src/scanners/{WindowsUpdateCache,CrashDumps,ThumbnailCache}Scanner.cpp` *(novos)*
+- `src/ui/FileDialogs.{h,cpp}` *(novos)*
+- `tests/test_path_exclusion.cpp` *(novo)*, `tests/test_category_keys.cpp`, `tests/CMakeLists.txt`, `CMakeLists.txt`
+- `README.md`, `CLAUDE.md`
+
 ### [2026-10-08] Auditoria total contra Bugmenn/claude: Regra 03 (acentuação da UI) + template completo
 **O que foi feito:** Auditoria de todos os 65 arquivos versionados + nível de usuário + skills do claude.ai + backup do Drive. Código: ~50 textos de UI sem acento corrigidos (Regra 03); `/utf-8` no MSVC (sem ele, literais acentuados saem corrompidos); `CategoryKey`/`CategoryFromKey` em `ScanItem.h` desacoplam a chave persistida em config/history.json do nome exibido (chaves antigas sem acento preservadas — compatibilidade); duplicação de `CategoryFromKey` em ConfigStore/HistoryStore eliminada; aba "Dashboard" → "Painel"; teste novo `test_category_keys`. Build Debug+Release 0 erros/0 warnings, ctest 2/2; bytes UTF-8/UTF-16 conferidos no `.exe`. `CLAUDE.md` completado conforme template (comando de execução, armadilhas de nomenclatura, estado limpo da suíte, memória do agente). `.claude/SETUP_CLAUDE_PADRAO.md` copiado do repositório. Bloqueado pelo classificador: correção de acentos no `.docx` do cronograma. Fora do alcance local: skills do claude.ai desatualizadas, backup do Drive desatualizado.
 **Arquivos alterados:**

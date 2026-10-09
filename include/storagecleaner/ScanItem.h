@@ -13,13 +13,17 @@ enum class Category {
     RecycleBin,
     RestorePoints,
     OrphanedApps,
+    WindowsUpdateCache,
+    CrashDumps,
+    ThumbnailCache,
 };
 
 // Ordem usada para iterar todas as categorias (UI, config, etc.).
 inline constexpr Category kAllCategories[] = {
-    Category::TempFiles,   Category::BrowserCache,  Category::Duplicate,
-    Category::OldLogs,     Category::RecycleBin,    Category::RestorePoints,
-    Category::OrphanedApps,
+    Category::TempFiles,          Category::BrowserCache, Category::Duplicate,
+    Category::OldLogs,            Category::RecycleBin,   Category::RestorePoints,
+    Category::OrphanedApps,       Category::WindowsUpdateCache, Category::CrashDumps,
+    Category::ThumbnailCache,
 };
 
 // Nome exibido na UI — pode mudar livremente (texto, acentuação).
@@ -32,6 +36,9 @@ inline const char* CategoryName(Category c) {
         case Category::RecycleBin:    return "Lixeira";
         case Category::RestorePoints: return "Pontos de restauração";
         case Category::OrphanedApps:  return "Dados órfãos (apps desinstalados)";
+        case Category::WindowsUpdateCache: return "Cache do Windows Update";
+        case Category::CrashDumps:    return "Despejos e relatórios de erro";
+        case Category::ThumbnailCache: return "Cache de miniaturas";
     }
     return "Desconhecido";
 }
@@ -49,6 +56,9 @@ inline const char* CategoryKey(Category c) {
         case Category::RecycleBin:    return "Lixeira";
         case Category::RestorePoints: return "Pontos de restauracao";
         case Category::OrphanedApps:  return "Dados orfaos (apps desinstalados)";
+        case Category::WindowsUpdateCache: return "windows_update_cache";
+        case Category::CrashDumps:    return "crash_dumps";
+        case Category::ThumbnailCache: return "thumbnail_cache";
     }
     return "Desconhecido";
 }
@@ -75,6 +85,19 @@ inline constexpr bool IsPermanentCategory(Category c) {
 // pré-selecionado na revisão manual; o usuário sempre marca item a item.
 inline constexpr bool IsHeuristicCategory(Category c) {
     return c == Category::OrphanedApps;
+}
+
+// Categorias cujas pastas/APIs só são acessíveis com o processo elevado. Sem
+// elevação, o ScanEngine nem chama o scanner e a UI lista a categoria como
+// "requer Administrador" em vez de mostrar zero itens como se estivesse limpa.
+inline constexpr bool IsAdminRequiredCategory(Category c) {
+    return c == Category::RestorePoints || c == Category::WindowsUpdateCache;
+}
+
+// Varridas mesmo sem elevação, mas só em parte (ex.: dumps do usuário sim,
+// os do sistema não) — a UI avisa que o resultado está incompleto.
+inline constexpr bool IsPartiallyAdminCategory(Category c) {
+    return c == Category::CrashDumps;
 }
 
 // Representa um item encontrado pelo scanner que pode ser removido para liberar espaço.

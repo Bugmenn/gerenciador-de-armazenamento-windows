@@ -37,6 +37,12 @@ void TestKeysMatchPersistedFormat() {
           "chave de RestorePoints inalterada");
     Check(std::strcmp(CategoryKey(Category::OrphanedApps), "Dados orfaos (apps desinstalados)") == 0,
           "chave de OrphanedApps inalterada");
+    Check(std::strcmp(CategoryKey(Category::WindowsUpdateCache), "windows_update_cache") == 0,
+          "chave de WindowsUpdateCache inalterada");
+    Check(std::strcmp(CategoryKey(Category::CrashDumps), "crash_dumps") == 0,
+          "chave de CrashDumps inalterada");
+    Check(std::strcmp(CategoryKey(Category::ThumbnailCache), "thumbnail_cache") == 0,
+          "chave de ThumbnailCache inalterada");
 }
 
 void TestRoundTripAllCategories() {

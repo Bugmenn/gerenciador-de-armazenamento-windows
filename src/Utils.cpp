@@ -253,6 +253,49 @@ std::wstring SystemToolPath(const wchar_t* toolName) {
     return path;
 }
 
+std::wstring CanonicalPath(const std::wstring& path) {
+    if (path.empty()) return path;
+    DWORD needed = ::GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+    if (needed == 0) return path;
+    std::wstring full(needed, L'\0');
+    DWORD written = ::GetFullPathNameW(path.c_str(), needed, full.data(), nullptr);
+    if (written == 0 || written >= needed) return path;
+    full.resize(written);
+
+    needed = ::GetLongPathNameW(full.c_str(), nullptr, 0);
+    if (needed == 0) return full; // não existe mais / sem acesso
+    std::wstring longPath(needed, L'\0');
+    written = ::GetLongPathNameW(full.c_str(), longPath.data(), needed);
+    if (written == 0 || written >= needed) return full;
+    longPath.resize(written);
+    return longPath;
+}
+
+std::vector<DriveSpace> EnumerateDrives() {
+    std::vector<DriveSpace> drives;
+    // Leitor de cartão sem mídia pode abrir a caixa "Não há disco na
+    // unidade" e travar esta worker até alguém clicar.
+    DWORD oldErrorMode = 0;
+    ::SetThreadErrorMode(SEM_FAILCRITICALERRORS, &oldErrorMode);
+    DWORD mask = ::GetLogicalDrives();
+    for (int i = 0; i < 26; ++i) {
+        if (!(mask & (1u << i))) continue;
+        wchar_t root[] = {static_cast<wchar_t>(L'A' + i), L':', L'\\', L'\0'};
+        UINT type = ::GetDriveTypeW(root);
+        if (type != DRIVE_FIXED && type != DRIVE_REMOVABLE) continue;
+
+        ULARGE_INTEGER freeToCaller{}, total{}, totalFree{};
+        // Falha = leitor de cartão sem mídia etc.; só não lista a unidade.
+        if (!::GetDiskFreeSpaceExW(root, &freeToCaller, &total, &totalFree)) continue;
+        if (total.QuadPart == 0) continue;
+
+        drives.push_back(DriveSpace{root, total.QuadPart, totalFree.QuadPart,
+                                    type == DRIVE_REMOVABLE});
+    }
+    ::SetThreadErrorMode(oldErrorMode, nullptr);
+    return drives;
+}
+
 std::vector<std::wstring> EnumerateUserProfileDirs() {
     std::vector<std::wstring> dirs;
     std::wstring usersRoot = KnownFolderPath(FOLDERID_UserProfiles);

@@ -153,10 +153,11 @@ bool SendToRecycleBin(const std::vector<ScanItem>& items, std::vector<bool>& suc
 } // namespace
 
 HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChannel& progress,
-                        std::atomic<bool>& cancel, bool wasAutomatic) {
+                        std::atomic<bool>& cancel, bool wasAutomatic, bool dryRun) {
     HistoryEntry entry;
     entry.timestamp = std::chrono::system_clock::now();
     entry.wasAutomatic = wasAutomatic;
+    entry.wasDryRun = dryRun;
 
     ProgressSnapshot snapshot;
     snapshot.phase = Phase::Cleaning;
@@ -186,7 +187,11 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
 
     if (!cancel.load() && !reversible.empty()) {
         std::vector<bool> succeededPerItem;
-        bool ranOk = SendToRecycleBin(reversible, succeededPerItem, errorSummary);
+        bool ranOk = true;
+        if (dryRun)
+            succeededPerItem.assign(reversible.size(), true);
+        else
+            ranOk = SendToRecycleBin(reversible, succeededPerItem, errorSummary);
         for (std::size_t i = 0; i < reversible.size(); ++i) {
             const ScanItem& item = reversible[i];
             bool itemSucceeded = i < succeededPerItem.size() && succeededPerItem[i];
@@ -225,7 +230,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
             std::uint64_t freedBefore = 0;
             for (const auto& item : recycleBinToEmpty) freedBefore += item.sizeBytes;
 
-            if (EmptyRecycleBin()) {
+            if (dryRun || EmptyRecycleBin()) {
                 entry.bytesFreedByCategory[Category::RecycleBin] += freedBefore;
                 entry.totalBytesFreed += freedBefore;
             } else {
@@ -253,7 +258,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
                 break;
             }
             const auto& item = restorePointsToDelete[i];
-            if (DeleteShadowCopy(item.path)) {
+            if (dryRun || DeleteShadowCopy(item.path)) {
                 entry.bytesFreedByCategory[Category::RestorePoints] += item.sizeBytes;
                 entry.totalBytesFreed += item.sizeBytes;
                 if (entry.items.size() < HistoryEntry::kMaxItemsPerEntry)

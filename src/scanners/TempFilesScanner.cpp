@@ -1,3 +1,4 @@
+#include "storagecleaner/PathExclusion.h"
 #include "storagecleaner/Scanner.h"
 #include "storagecleaner/Utils.h"
 
@@ -5,6 +6,7 @@
 #include <shlobj.h>
 
 #include <filesystem>
+#include <set>
 
 namespace fs = std::filesystem;
 
@@ -42,24 +44,29 @@ std::vector<ScanItem> ScanTempFiles(const Config& config, ProgressChannel& progr
     snapshot.phase = Phase::ScanningTemp;
     progress.Update(snapshot);
 
+    // O %TEMP% do usuário atual normalmente é o mesmo AppData\Local\Temp do
+    // laço de perfis abaixo (às vezes em forma 8.3): sem comparar a forma
+    // canônica, cada arquivo entrava duas vezes e o total saía dobrado.
+    std::set<std::wstring> scannedRoots;
+    auto scanRootOnce = [&](const fs::path& dir) {
+        if (cancel.load()) return;
+        std::wstring canonical = util::CanonicalPath(dir.wstring());
+        if (!scannedRoots.insert(NormalizePathForCompare(canonical)).second) return;
+        ScanDirForTempFiles(canonical, config, progress, cancel, items, snapshot);
+    };
+
     // %TEMP% do usuário atual.
-    if (wchar_t tempPath[MAX_PATH]; ::GetTempPathW(MAX_PATH, tempPath) > 0)
-        ScanDirForTempFiles(tempPath, config, progress, cancel, items, snapshot);
+    if (wchar_t tempPath[MAX_PATH]; ::GetTempPathW(MAX_PATH, tempPath) > 0) scanRootOnce(tempPath);
 
     // C:\Windows\Temp — compartilhado por todos os usuários e por serviços.
     std::wstring windowsDir = util::KnownFolderPath(FOLDERID_Windows);
-    if (!windowsDir.empty() && !cancel.load())
-        ScanDirForTempFiles(fs::path(windowsDir) / L"Temp", config, progress, cancel, items,
-                            snapshot);
+    if (!windowsDir.empty()) scanRootOnce(fs::path(windowsDir) / L"Temp");
 
     // AppData\Local\Temp de cada usuário. Perfis de outros usuários exigem
     // privilégio de administrador para leitura; sem elevação, o iterador
     // simplesmente pula essas pastas (skip_permission_denied) em vez de falhar.
-    for (const auto& profileDir : util::EnumerateUserProfileDirs()) {
-        if (cancel.load()) break;
-        ScanDirForTempFiles(fs::path(profileDir) / L"AppData" / L"Local" / L"Temp", config,
-                            progress, cancel, items, snapshot);
-    }
+    for (const auto& profileDir : util::EnumerateUserProfileDirs())
+        scanRootOnce(fs::path(profileDir) / L"AppData" / L"Local" / L"Temp");
 
     snapshot.fractionComplete = 1.0f;
     progress.Update(snapshot);

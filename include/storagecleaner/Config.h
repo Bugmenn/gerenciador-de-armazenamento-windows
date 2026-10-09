@@ -18,7 +18,8 @@ enum class AutoCleanFrequency {
 };
 
 // AutoDelete limpa sozinho o que for encontrado; AskConfirmation apenas
-// escaneia e traz a janela para frente, deixando a exclusão para o usuário.
+// escaneia e avisa por balão na bandeja (sem roubar o foco), deixando a
+// exclusão para o usuário.
 enum class AutoCleanMode {
     AutoDelete,
     AskConfirmation,
@@ -26,6 +27,18 @@ enum class AutoCleanMode {
 
 struct CategoryConfig {
     bool enabled = true;
+};
+
+// Posição/tamanho da janela do Windows na última saída do app. Coordenadas
+// de GetWindowPlacement (rcNormalPosition): mesmo sistema que
+// SetWindowPlacement consome, então o ida-e-volta é exato.
+struct WindowPlacement {
+    bool valid = false;
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    bool maximized = false;
 };
 
 struct Config {
@@ -46,6 +59,18 @@ struct Config {
     std::vector<std::wstring> duplicateScanRoots;
 
     std::map<Category, CategoryConfig> perCategory;
+
+    // Pastas/arquivos que nunca são oferecidos para limpeza, nem uma pasta
+    // que os contenha (ver PathExclusion.h).
+    std::vector<std::wstring> excludedPaths;
+
+    // Balão na bandeja quando o espaço livre de uma unidade fixa cai abaixo
+    // desse percentual; rearma quando volta a ficar acima.
+    bool lowDiskAlertEnabled = true;
+    int lowDiskAlertPercent = 10;
+
+    // Gravada só ao sair do app (App.cpp), independente do botão "Salvar".
+    WindowPlacement window;
 
     // Execução em segundo plano.
     bool startWithWindows = false;

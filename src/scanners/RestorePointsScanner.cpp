@@ -55,15 +55,8 @@ std::vector<ScanItem> ScanRestorePoints(const Config& config, ProgressChannel& p
 
     std::vector<ScanItem> items;
 
-    if (!IsRunningElevated()) {
-        // Sem privilégio de administrador o vssadmin nem consulta a lista;
-        // a UI mostra um aviso pedindo para reabrir o app como Administrador
-        // em vez de reportar isso como um erro genérico.
-        snapshot.lastError =
-            "Pontos de restauração exigem executar como Administrador";
-        progress.Update(snapshot);
-        return items;
-    }
+    // Sem elevação o ScanEngine nem chama este scanner (IsAdminRequiredCategory)
+    // e a UI avisa; ListShadowCopies ainda devolve vazio por conta própria.
 
     std::vector<ShadowCopyInfo> shadows = ListShadowCopies();
     SortByCreationTimeIfPossible(shadows);

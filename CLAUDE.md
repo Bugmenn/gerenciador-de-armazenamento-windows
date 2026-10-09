@@ -35,16 +35,16 @@ cmake -B build -G "MinGW Makefiles"
 cmake --build build
 ```
 
-Testes (`test_duplicate_grouping` e `test_category_keys` — só lógica sem dependência de Win32/COM/VSS):
+Testes (`test_duplicate_grouping`, `test_category_keys` e `test_path_exclusion` — só lógica sem dependência de Win32/COM/VSS):
 ```powershell
-cmake --build build --target test_duplicate_grouping test_category_keys
+cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion
 ctest --test-dir build                          # todos os testes
 ctest --test-dir build -R duplicate_grouping     # um teste específico
 ```
 
-**Estado limpo da suíte:** 2 testes (`duplicate_grouping`, `category_keys`), 0 falhas pré-existentes. Conferir na saída do `ctest` que ambos de fato executaram (`100% tests passed, 0 tests failed out of 2`).
+**Estado limpo da suíte:** 3 testes (`duplicate_grouping`, `category_keys`, `path_exclusion`), 0 falhas pré-existentes. Conferir na saída do `ctest` que todos de fato executaram (`100% tests passed, 0 tests failed out of 3`).
 
-Subir a aplicação: `build\Release\StorageCleaner.exe` (MSVC) ou `build\StorageCleaner.exe` (MinGW/Ninja); `--startup` abre direto na bandeja. Rodar como Administrador para incluir pontos de restauração.
+Subir a aplicação: `build\Release\StorageCleaner.exe` (MSVC) ou `build\StorageCleaner.exe` (MinGW/Ninja); `--startup` abre direto na bandeja; `--dry-run` liga o modo simulação (nenhuma limpeza exclui nada — **único modo permitido para testar limpeza nesta máquina**, ver memória do agente); `--test-balloons` mostra os 6 balões da bandeja em sequência (8 s cada) para o usuário conferir visualmente — esta sessão não enxerga a área de trabalho. Textos dos balões só em `src/ui/Notifications.cpp`. Rodar como Administrador para incluir pontos de restauração e cache do Windows Update.
 
 Lint: não há lint configurado. Migrations: não se aplica.
 
@@ -76,13 +76,13 @@ Otimizador/limpador de armazenamento para Windows: app desktop que varre o disco
 
 Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cleaner` → `include/storagecleaner`):
 
-- **`include/storagecleaner/`** — modelo de dados e contratos compartilhados, independentes de UI: `ScanItem`/`Category` (`IsPermanentCategory`, `IsHeuristicCategory`), `Config` (inclui `SanitizeConfig()`), `ScanResult`, `HistoryEntry`, `ProgressState` (`ProgressChannel`, canal de progresso thread-safe via mutex+snapshot), `Scanner.h` (assinatura comum dos scanners + `ScanEngine`), `Cleaner.h`, `ConfigStore.h`/`HistoryStore.h` (persistência JSON em `%APPDATA%\StorageCleaner\`, escrita atômica via `.tmp` + `MoveFileExW`). `DuplicateGrouping.h` e as funções de categoria de `ScanItem.h` são as únicas lógicas 100% livres de Win32 — por isso são as únicas testáveis sem toolchain Windows.
-- **`src/scanners/`** — um scanner por categoria, todos com a mesma assinatura (`Config`, `ProgressChannel&`, `std::atomic<bool>& cancel`), orquestrados sequencialmente por `ScanEngine` (`ScanEngine.cpp`) numa worker thread própria.
-- **`src/cleaner/`** — `Cleaner.cpp` decide, por categoria, se a exclusão é reversível (via `IFileOperation` + Lixeira, com `IFileOperationProgressSink` para saber item a item se a remoção realmente aconteceu) ou permanente (esvaziar a Lixeira, remover shadow copy via `vssadmin`).
+- **`include/storagecleaner/`** — modelo de dados e contratos compartilhados, independentes de UI: `ScanItem`/`Category` (`IsPermanentCategory`, `IsHeuristicCategory`), `Config` (inclui `SanitizeConfig()`), `ScanResult`, `HistoryEntry`, `ProgressState` (`ProgressChannel`, canal de progresso thread-safe via mutex+snapshot), `Scanner.h` (assinatura comum dos scanners + `ScanEngine`), `Cleaner.h`, `ConfigStore.h`/`HistoryStore.h` (persistência JSON em `%APPDATA%\StorageCleaner\`, escrita atômica via `.tmp` + `MoveFileExW`). `DuplicateGrouping.h`, `PathExclusion.h` (pastas protegidas) e as funções de categoria de `ScanItem.h` são as únicas lógicas 100% livres de Win32 — por isso são as únicas testáveis sem toolchain Windows.
+- **`src/scanners/`** — um scanner por categoria, todos com a mesma assinatura (`Config`, `ProgressChannel&`, `std::atomic<bool>& cancel`), orquestrados sequencialmente por `ScanEngine` (`ScanEngine.cpp`) numa worker thread própria a partir da tabela `kScanners` (um `static_assert` exige uma linha por categoria). O `ScanEngine` também pula categorias de `IsAdminRequiredCategory` sem elevação (vão para `ScanResult::skippedNeedAdmin`) e aplica a lista de pastas protegidas em `AddBucket` — **categoria nova** = enum + `kAllCategories` + `CategoryName`/`CategoryKey` + `Phase`/`PhaseLabel` + scanner + linha em `kScanners` + `CMakeLists.txt` + chave em `tests/test_category_keys.cpp`.
+- **`src/cleaner/`** — `Cleaner.cpp` decide, por categoria, se a exclusão é reversível (via `IFileOperation` + Lixeira, com `IFileOperationProgressSink` para saber item a item se a remoção realmente aconteceu) ou permanente (esvaziar a Lixeira, remover shadow copy via `vssadmin`). `CleanItems` é o **único ponto do app que exclui algo** — o `dryRun` (`--dry-run`) é verificado ali; qualquer caminho novo de exclusão precisa passar por ele ou respeitar a mesma flag.
 - **`src/ui/`** — Dear ImGui: `App.cpp` (bootstrap Win32+DX11+ImGui, loop principal, ícone na bandeja), `UiState.*` (todo o estado mutável de UI: seleção de itens, varredura leve em thread própria, agendamento de auto-clean — `Tick()` roda uma vez por frame e concentra essa lógica fora dos `*Panel.cpp`, que só desenham), painéis por aba (`DashboardPanel`, `ResultsPanel`, `SettingsPanel`, `HistoryPanel`), `TrayIcon.*` (bandeja + auto-início via registro do Windows), `Theme.h`/`Theme.cpp` (paleta central `theme::k*`, `ApplyTheme()`/`LoadFonts()` chamados uma vez em `RunApp()`, `AppFonts` guardado em `UiState::fonts`, e `DrawCircularGauge`/`DrawInlineCircularGauge` — gauge circular customizado via `ImDrawList` que substitui `ImGui::ProgressBar` nos pontos de progresso de scan/clean).
 - **`resources/`** — recurso Win32 do executável: `app.ico` (multi-resolução), `app.rc` e `resource.h` (`IDI_APP_ICON`, compartilhado entre o `.rc` e o C++ via `#include "resource.h"`). Usado por `App.cpp` (janela/taskbar) e `TrayIcon.cpp` (bandeja) via `LoadImageW(..., MAKEINTRESOURCEW(IDI_APP_ICON), ...)`.
 
-**Categorias reversíveis vs. permanentes** (`IsPermanentCategory` em `ScanItem.h`): temp, cache, duplicados, logs e dados órfãos vão para a Lixeira; só Lixeira (esvaziar) e pontos de restauração são permanentes. "Dados órfãos" é heurística (`IsHeuristicCategory`): desabilitada por padrão, nunca pré-selecionada, nunca entra na limpeza automática mesmo se habilitada.
+**Categorias reversíveis vs. permanentes** (`IsPermanentCategory` em `ScanItem.h`): temp, cache, duplicados, logs, dados órfãos, cache do Windows Update, despejos de erro e miniaturas vão para a Lixeira; só Lixeira (esvaziar) e pontos de restauração são permanentes. "Dados órfãos" é heurística (`IsHeuristicCategory`): desabilitada por padrão, nunca pré-selecionada, nunca entra na limpeza automática mesmo se habilitada.
 
 ## Padrões críticos
 
@@ -94,6 +94,7 @@ Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cl
 - **Texto de UI em pt-BR com acentuação** (Regra 03 global), em literais UTF-8 — funciona porque `CMakeLists.txt` passa `/utf-8` ao MSVC e a fonte (Segoe UI, faixa padrão do ImGui) cobre Latin-1 (U+0020–U+00FF). **Nada acima disso em texto de UI** — travessão "—", aspas curvas, reticências "…" aparecem como "?"; usar "-", aspas retas, "...".
 - **Nome exibido ≠ chave persistida:** `CategoryName()` é só exibição (pode mudar); `CategoryKey()`/`CategoryFromKey()` (`ScanItem.h`) são as chaves em `config.json`/`history.json` e **nunca mudam** — alterá-las faz o app ignorar config/histórico existentes sem erro.
 - **Comentários** no código só explicam o "porquê" em pontos não óbvios (regras de segurança, motivos de design) — nunca o "o quê".
+- **Nunca roubar o foco:** nada que roda sozinho (agendamento, varredura leve, alertas) mostra a janela ou chama `SetForegroundWindow` — avisa por `ShowTrayBalloon` (o Windows já adia balões em tela cheia/apresentação/"Não perturbe"; `NIIF_RESPECT_QUIET_TIME` **não** é isso — só cobre a 1ª hora após o primeiro logon). Um `ShowTrayBalloon` substitui o anterior — por isso todo aviso passa pelos `Notify*` de `src/ui/Notifications.cpp`, que enfileiram e saem com 8 s de intervalo (`PumpNotifications()` no `Tick`); nunca chamar `ShowTrayBalloon` direto. A janela só abre por ação explícita do usuário: "Abrir" no menu da bandeja ou clique num balão (`NIN_BALLOONUSERCLICK` → `ShowMainWindow` em `App.cpp`). Decisão do usuário: ele pode estar jogando, digitando ou apresentando.
 - **Cores de status** (sucesso/aviso/erro) sempre pelas constantes de `theme::`, nunca `ImVec4` hardcoded.
 - **Flags de compilador obrigatórias** (já em `CMakeLists.txt`, não repetir em código): `UNICODE`/`_UNICODE`, `NOMINMAX`, `/EHsc` e `/utf-8` no MSVC — ver Pitfalls.
 - **Testes:** bug em lógica livre de Win32 → teste em `tests/` que reproduz o bug. O resto do app só se valida rodando o `.exe` (ver skill `run`).
@@ -101,6 +102,8 @@ Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cl
 ## Pitfalls conhecidos
 
 - **Só compila/executa em Windows:** a tool **Bash** pode rodar num ambiente sem toolchain Windows (só dá pra rodar os testes de `tests/`); a tool **PowerShell** roda na máquina Windows real e compila o projeto inteiro via `VsDevCmd.bat` (ver "Build real via PowerShell"). Preferir build real a revisão só por leitura.
+- **A tool PowerShell não enxerga a janela do app:** `CopyFromScreen` falha ("identificador inválido") e `PrintWindow` devolve o cliente DX11 em branco — a validação visual da UI tem de ser feita pelo usuário. Dá para medir pelo PowerShell (só leitura) as pastas que um scanner vai encontrar, e controlar a janela por Win32: `GetWindowRect`/`SetWindowPos`/`ShowWindow` funcionam, e `PostMessage(hwnd, WM_COMMAND, 3, 0)` (= "Sair" da bandeja, `kMenuExit`) encerra o app **pelo caminho normal** (grava a janela no config.json; `Stop-Process` não grava). Com `--startup` a janela nasce escondida e `MainWindowHandle` vem 0 — achar o hwnd com `EnumWindows` filtrando pelo PID.
+- **Barras invertidas em heredoc pela tool Bash:** escapes como `L'\\'` chegam corrompidos (viram `L'\'` e um byte NUL) ao editar C++ via `python - <<EOF` — para trechos com `\`, usar a tool Edit.
 - **Sem `UNICODE`/`_UNICODE`:** macros genéricas de recurso do Win32 (ex. `IDI_APPLICATION`) resolvem para `LPSTR` e quebram chamadas `...W`.
 - **Sem `NOMINMAX`:** `windows.h` define macros `max`/`min` que colidem com `std::max`/`std::min`.
 - **Sem `/utf-8` no MSVC:** fontes UTF-8 sem BOM são lidas na code page 1252 e todo literal acentuado (inclusive `L"..."`) sai corrompido na UI.

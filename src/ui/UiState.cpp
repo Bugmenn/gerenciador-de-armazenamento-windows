@@ -1,6 +1,7 @@
-#include "TrayIcon.h"
+#include "Notifications.h"
 #include "UiState.h"
 #include "storagecleaner/HistoryStore.h"
+#include "storagecleaner/PathExclusion.h"
 #include "storagecleaner/Utils.h"
 
 #include <algorithm>
@@ -39,11 +40,17 @@ bool IsPastConfiguredTimeOfDay(const std::string& hhmm) {
     return (nowTm.tm_hour > hour) || (nowTm.tm_hour == hour && nowTm.tm_min >= minute);
 }
 
-bool ShouldRunAutoClean(const Config& config) {
+// `lastTriggerThisSession` cobre os disparos que não gravam limpeza real no
+// histórico — simulação (--dry-run) e "pedir confirmação" sem o usuário
+// confirmar. Sem ele, o timer de 60 s refazia a varredura completa a cada
+// minuto até o app fechar.
+bool ShouldRunAutoClean(const Config& config,
+                        std::optional<std::chrono::system_clock::time_point> lastTriggerThisSession) {
     if (!config.autoCleanEnabled) return false;
     if (!IsPastConfiguredTimeOfDay(config.autoCleanTimeOfDay)) return false;
 
     auto last = LastAutoCleanTimestamp();
+    if (lastTriggerThisSession && (!last || *lastTriggerThisSession > *last)) last = lastTriggerThisSession;
     if (!last.has_value()) return true; // nunca rodou: dispara na primeira checagem apos o horario
 
     auto elapsedHours =
@@ -74,8 +81,13 @@ void UiState::StartClean(const std::vector<ScanItem>& selected, bool automatic) 
 
     if (cleanThread.joinable()) cleanThread.join();
 
-    cleanThread = std::thread([this, selected, automatic]() {
-        HistoryEntry entry = CleanItems(selected, cleanProgress, cleanCancel, automatic);
+    cleanThread = std::thread([this, items = selected, automatic, dryRun = dryRun,
+                               excluded = config.excludedPaths]() mutable {
+        // O ScanEngine já filtra as pastas protegidas, mas o resultado pode
+        // ser de antes de o usuário proteger uma pasta. Roda aqui, e não na
+        // UI thread, porque canonizar cada caminho faz I/O de metadados.
+        RemoveProtectedItems(items, excluded);
+        HistoryEntry entry = CleanItems(items, cleanProgress, cleanCancel, automatic, dryRun);
         AppendHistoryEntry(entry);
         historyLoaded = false; // força recarregar na próxima abertura da aba Histórico
 
@@ -117,7 +129,70 @@ UiState::SelectionSummary UiState::GetSelectionSummary() const {
     return summary;
 }
 
+void UiState::CheckLowDiskAlert() {
+    if (!config.lowDiskAlertEnabled) {
+        lowDiskAlerted.clear();
+        return;
+    }
+    std::wstring text;
+    for (const auto& drive : GetLightTotals().drives) {
+        // Pendrive/cartão cheio é comum e esperado; alertar só unidades fixas.
+        if (drive.isRemovable) continue;
+        double freePercent = 100.0 * static_cast<double>(drive.freeBytes) /
+                             static_cast<double>(drive.totalBytes);
+        bool low = freePercent < config.lowDiskAlertPercent;
+        if (!low) {
+            lowDiskAlerted.erase(drive.root); // rearma para a próxima queda
+            continue;
+        }
+        if (!lowDiskAlerted.insert(drive.root).second) continue; // já avisado
+        if (!text.empty()) text += L" ";
+        text += LowDiskDriveText(drive.root, drive.freeBytes, static_cast<int>(freePercent));
+    }
+    // Um balão para todas as unidades, em vez de um por unidade na fila.
+    if (!text.empty()) NotifyLowDisk(text);
+}
+
+void UiState::ApplyExclusionsToLastResult() {
+    // Versão textual (sem canonizar) porque roda na UI thread; a limpeza
+    // refaz o filtro completo na worker antes de excluir qualquer coisa.
+    for (std::size_t b = 0; b < lastScanResult.buckets.size() && b < selection.size(); ++b) {
+        auto& bucket = lastScanResult.buckets[b];
+        auto& sel = selection[b];
+        std::vector<ScanItem> keptItems;
+        std::vector<bool> keptSel;
+        bucket.totalBytes = 0;
+        for (std::size_t i = 0; i < bucket.items.size(); ++i) {
+            if (IsExcludedPath(bucket.items[i].path, bucket.items[i].isDirectory, config.excludedPaths))
+                continue;
+            bucket.totalBytes += bucket.items[i].sizeBytes;
+            keptItems.push_back(std::move(bucket.items[i]));
+            keptSel.push_back(i < sel.size() && sel[i]);
+        }
+        bucket.items = std::move(keptItems);
+        sel = std::move(keptSel);
+    }
+}
+
+void UiState::EnqueueBalloonTest() {
+    // Valores fictícios; os textos vêm das mesmas funções dos fluxos reais
+    // (Notifications.cpp), e a fila os mostra um a cada 8 s.
+    auto prefix = [](int n) { return L"[Teste " + std::to_wstring(n) + L"/6] "; };
+    const std::uint64_t sample = 1288490189; // ~1,2 GB
+    NotifyScanDone(sample, /*scheduled=*/false, prefix(1));
+    NotifyScanDone(0, /*scheduled=*/false, prefix(2));
+    NotifyScanDone(sample, /*scheduled=*/true, prefix(3));
+    NotifyAutoCleanDone(sample, /*dryRun=*/true, prefix(4));
+    NotifyAutoCleanDone(sample, /*dryRun=*/false, prefix(5));
+    NotifyLowDisk(LowDiskDriveText(L"C:\\", 10200547328ull /* ~9,5 GB */, 4), prefix(6));
+}
+
 void UiState::Tick() {
+    if (testBalloons && !balloonTestQueued) {
+        EnqueueBalloonTest();
+        balloonTestQueued = true;
+    }
+
     // Absorve o resultado da varredura, se pronto, e prepara a seleção
     // (todas as categorias, exceto as heurísticas, já vêm marcadas).
     ScanResult freshResult;
@@ -145,11 +220,25 @@ void UiState::Tick() {
             }
             currentScanIsAutoClean = false;
         } else if (currentScanIsAutoClean) {
-            // Modo "pedir confirmacao": só traz a janela para frente e espera
-            // o usuário revisar; currentScanIsAutoClean continua true até o
-            // clique em "Limpar selecionados" (ver ResultsPanel), para que o
-            // HistoryEntry resultante ainda seja marcado como automático.
-            windowVisible = true;
+            // Modo "pedir confirmacao": só avisa por balão — abrir a janela
+            // sozinho roubaria o foco de quem estiver jogando, digitando ou
+            // apresentando. Clicar no balão abre a janela (App.cpp,
+            // NIN_BALLOONUSERCLICK). currentScanIsAutoClean continua true até
+            // o clique em "Limpar selecionados" (ver ResultsPanel), para que
+            // o HistoryEntry resultante ainda seja marcado como automático.
+            // Sem balão se não há nada a revisar ou se a janela está à vista
+            // (a aba Resultados já foi selecionada acima); escondida na
+            // bandeja ou minimizada, avisa.
+            std::uint64_t found = lastScanResult.GrandTotalBytes();
+            if (found > 0 && (!windowVisible || windowMinimized))
+                NotifyScanDone(found, /*scheduled=*/true);
+        } else if ((!windowVisible || windowMinimized) &&
+                   scanProgress.Read().phase != Phase::Cancelled) {
+            // Varredura manual (tela ou "Escanear agora" da bandeja) que
+            // terminou com a janela fora de vista: o usuário pediu e espera um
+            // retorno, inclusive "nada encontrado". Cancelada não avisa (foi
+            // ele mesmo quem cancelou).
+            NotifyScanDone(lastScanResult.GrandTotalBytes(), /*scheduled=*/false);
         }
     }
 
@@ -158,12 +247,14 @@ void UiState::Tick() {
     if (autoCleanNotifyArmed && !cleaning.load()) {
         std::lock_guard<std::mutex> lock(cleanResultMutex);
         if (pendingCleanResult.has_value()) {
-            std::wstring text =
-                L"Espaço liberado: " + util::Utf8ToWide(util::FormatSize(pendingCleanResult->totalBytesFreed));
-            ShowTrayBalloon(L"Limpeza automática concluída", text.c_str());
+            NotifyAutoCleanDone(pendingCleanResult->totalBytesFreed, pendingCleanResult->wasDryRun);
             autoCleanNotifyArmed = false;
         }
     }
+
+    // Balão da bandeja sai daqui (UI thread), não da worker da varredura leve.
+    if (lightScanFresh.exchange(false)) CheckLowDiskAlert();
+    PumpNotifications();
 
     // Varredura leve periódica em segundo plano — roda em worker thread
     // própria (nunca direto aqui em Tick(), que é a UI thread): apesar do
@@ -187,6 +278,7 @@ void UiState::Tick() {
                 std::lock_guard<std::mutex> lock(lightScanMutex);
                 lightTotals = totals;
             }
+            lightScanFresh.store(true);
             lightScanInProgress.store(false);
         });
     }
@@ -197,8 +289,13 @@ void UiState::Tick() {
                                   .count();
     if (sinceAutoCleanCheck >= 60) {
         lastAutoCleanCheck = std::chrono::system_clock::now();
-        if (!scanEngine.IsRunning() && !cleaning.load() && ShouldRunAutoClean(config))
+        // No --test-balloons o agendamento fica parado: o teste é só visual
+        // e não pode disparar varredura/limpeza por baixo.
+        if (!testBalloons && !scanEngine.IsRunning() && !cleaning.load() &&
+            ShouldRunAutoClean(config, lastAutoCleanTrigger)) {
+            lastAutoCleanTrigger = std::chrono::system_clock::now();
             StartScan(/*triggeredByAutoClean=*/true);
+        }
     }
 }
 

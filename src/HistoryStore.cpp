@@ -63,6 +63,7 @@ json ToJson(const HistoryEntry& entry) {
     j["errorSummary"] = entry.errorSummary;
     j["wasAutomatic"] = entry.wasAutomatic;
     j["itemsSkipped"] = entry.itemsSkipped;
+    j["wasDryRun"] = entry.wasDryRun;
 
     json byCategory = json::object();
     for (const auto& [category, bytes] : entry.bytesFreedByCategory)
@@ -81,6 +82,7 @@ HistoryEntry EntryFromJson(const json& j) {
     entry.errorSummary = j.value("errorSummary", std::string());
     entry.wasAutomatic = j.value("wasAutomatic", false);
     entry.itemsSkipped = j.value("itemsSkipped", std::size_t{0});
+    entry.wasDryRun = j.value("wasDryRun", false);
 
     if (j.contains("bytesFreedByCategory")) {
         for (const auto& [key, value] : j["bytesFreedByCategory"].items()) {
@@ -149,7 +151,8 @@ void AppendHistoryEntry(const HistoryEntry& entry) {
 std::optional<std::chrono::system_clock::time_point> LastAutoCleanTimestamp() {
     std::vector<HistoryEntry> entries = LoadHistory();
     for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
-        if (it->wasAutomatic) return it->timestamp;
+        // Uma simulação não limpou nada: não pode adiar a próxima limpeza real.
+        if (it->wasAutomatic && !it->wasDryRun) return it->timestamp;
     }
     return std::nullopt;
 }

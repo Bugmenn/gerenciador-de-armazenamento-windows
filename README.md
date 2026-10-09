@@ -26,6 +26,9 @@ e a UI mostra um aviso em vez de falhar.
 | Lixeira | Tamanho total ocupado pela própria Lixeira | **Permanente** (esvaziar não tem "desfazer") |
 | Pontos de restauração | Shadow copies (VSS) além do número configurado a manter | **Permanente** (requer executar como Administrador) |
 | Dados órfãos | Pastas em `AppData` de aplicativos que não aparecem mais na lista de programas instalados nem em `Program Files`, e que estão inativas há um tempo mínimo configurável | Lixeira (reversível) — **desabilitado por padrão** |
+| Cache do Windows Update | Conteúdo de `Windows\SoftwareDistribution\Download` sem atividade no último dia (a pasta em si é mantida) | Lixeira (reversível) — requer Administrador |
+| Despejos e relatórios de erro | `Windows\Minidump`, `Windows\MEMORY.DMP`, `AppData\Local\CrashDumps` de cada usuário e relatórios do WER em `ProgramData` | Lixeira (reversível) |
+| Cache de miniaturas | `thumbcache_*.db` e `iconcache_*.db` do Explorer (os que o Explorer estiver usando no momento são pulados) | Lixeira (reversível) |
 
 **Sobre "Dados órfãos":** essa categoria é heurística — compara nomes de
 pastas de AppData contra o registro de programas instalados e as pastas de
@@ -49,7 +52,12 @@ limpeza automática agendada, mesmo que esteja habilitada.
 - **Limpeza automática agendada**: configurável para rodar todo dia, a cada
   7 dias, a cada 15 dias ou uma vez por mês, num horário definido. Dois
   modos: excluir automaticamente o que for encontrado, ou apenas escanear e
-  trazer a janela para frente pedindo confirmação do usuário.
+  avisar por um balão na bandeja quanto foi encontrado. **O app nunca abre a
+  janela nem rouba o foco sozinho** (o usuário pode estar jogando, digitando
+  ou apresentando): a janela só abre se ele clicar no balão ou em "Abrir" no
+  menu da bandeja. O próprio Windows adia os balões durante jogos em tela
+  cheia, apresentações e "Não perturbe". Se a varredura não encontrar nada,
+  ou se a janela já estiver aberta, não há balão.
 - **Histórico**: toda limpeza executada (manual ou automática) fica
   registrada — data, espaço liberado por categoria, e a lista de itens
   removidos. Passar o mouse sobre o espaço liberado de uma entrada mostra
@@ -63,6 +71,24 @@ limpeza automática agendada, mesmo que esteja habilitada.
 O ícone na bandeja (próprio do app, o mesmo usado na janela e na barra de
 tarefas) tem um menu de contexto com três opções — **Abrir**, **Escanear
 agora** e **Sair** — sem atalhos de teclado associados.
+
+Avisos em balão (clicar em qualquer um abre a janela):
+
+| Balão | Quando aparece |
+|---|---|
+| Varredura concluída | Varredura pedida pelo usuário (tela ou "Escanear agora") termina com a janela escondida na bandeja ou minimizada — inclusive quando não há nada a limpar. Cancelada não avisa. |
+| Varredura agendada concluída | Agendamento no modo "pedir confirmação" encontrou algo e a janela está escondida na bandeja ou minimizada |
+| Limpeza automática concluída | Agendamento no modo "excluir automaticamente" terminou (em `--dry-run`, mostra o que *seria* liberado) |
+| Pouco espaço em disco | Unidade fixa abaixo do percentual configurado (uma vez por queda) |
+
+Os avisos saem com pelo menos 8 segundos entre um e outro: o Windows troca um
+balão pelo seguinte, então dois avisos seguidos fariam o primeiro sumir.
+
+`StorageCleaner.exe --test-balloons` mostra os seis textos possíveis em
+sequência, um a cada 8 segundos, com o título prefixado por "[Teste n/6]" —
+serve para conferir que os avisos aparecem nesta máquina. Nesse modo o
+agendamento fica parado e o modo simulação (`--dry-run`) é ligado junto, então
+nada é excluído.
 
 ### Durante uma varredura
 
@@ -86,8 +112,13 @@ Tudo fica salvo em `%APPDATA%\StorageCleaner\` (`C:\Users\<usuário>\AppData\Roa
 
 | Arquivo | Conteúdo |
 |---|---|
-| `config.json` | Configurações da aba "Configurações" (só é gravado quando o usuário clica em "Salvar") |
+| `config.json` | Configurações da aba "Configurações" (gravadas quando o usuário clica em "Salvar"); as pastas protegidas são gravadas na hora, e a posição/tamanho/maximizado da janela ao sair do app |
 | `history.json` | Histórico de limpezas executadas |
+
+O app não grava nada na pasta do `.exe` (versões anteriores deixavam um
+`imgui.ini` ali ao fechar; pode ser apagado). Se a posição salva cair fora de
+qualquer monitor (monitor desconectado, resolução menor), a janela abre na
+posição padrão.
 
 A escrita é sempre atômica (grava num arquivo `.tmp` e substitui o original
 via `MoveFileExW`), para não corromper o arquivo se o app fechar no meio de
@@ -103,6 +134,8 @@ uma gravação.
 | Pontos de restauração a manter | 2 (os demais são candidatos a remoção) |
 | Inatividade mínima para uma pasta de AppData virar "órfã" | 180 dias |
 | Intervalo da varredura leve em segundo plano | 60 minutos (mínimo forçado: 5 minutos) |
+| Alerta de pouco espaço (balão na bandeja, só unidades fixas) | ligado, abaixo de 10% livre (aceita 1-50%) |
+| Pastas protegidas | nenhuma |
 | Iniciar com o Windows | desligado |
 | Minimizar para a bandeja ao fechar | ligado |
 | Limpeza automática agendada | desligada; quando ligada, padrão é a cada 7 dias às 03:00, no modo "pedir confirmação" |
@@ -152,10 +185,25 @@ O Dear ImGui e o `nlohmann::json` são baixados automaticamente pelo CMake
 Algumas operações (pontos de restauração) exigem executar o `.exe` como
 Administrador; sem isso, essa categoria é pulada e a UI mostra um aviso.
 
+## Modo simulação
+
+`StorageCleaner.exe --dry-run` faz tudo como de costume (varredura, revisão,
+confirmação, histórico), mas a limpeza **não exclui nada**: o histórico
+registra o que *seria* liberado, marcado como "(simulação)". Uma limpeza
+automática simulada não adia a próxima limpeza automática real.
+
+## Pastas protegidas e alerta de espaço
+
+Na aba Configurações dá para proteger pastas: nada dentro delas é oferecido
+para limpeza, nem uma pasta que as contenha (apagar a pasta-pai levaria a
+protegida junto). O Painel mostra o espaço livre de cada unidade fixa ou
+removível, e um balão na bandeja avisa quando uma unidade fixa cai abaixo do
+percentual configurado — uma vez por queda, não a cada varredura.
+
 ## Testes
 
 ```powershell
-cmake --build build --target test_duplicate_grouping test_category_keys
+cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion
 ctest --test-dir build
 ```
 

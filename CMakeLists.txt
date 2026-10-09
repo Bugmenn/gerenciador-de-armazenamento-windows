@@ -47,6 +47,7 @@ add_executable(StorageCleaner WIN32
     src/ConfigStore.cpp
     src/HistoryStore.cpp
     src/DuplicateGrouping.cpp
+    src/PathExclusion.cpp
     src/scanners/TempFilesScanner.cpp
     src/scanners/BrowserCacheScanner.cpp
     src/scanners/DuplicateScanner.cpp
@@ -54,6 +55,9 @@ add_executable(StorageCleaner WIN32
     src/scanners/RecycleBinScanner.cpp
     src/scanners/RestorePointsScanner.cpp
     src/scanners/OrphanedAppDataScanner.cpp
+    src/scanners/WindowsUpdateCacheScanner.cpp
+    src/scanners/CrashDumpsScanner.cpp
+    src/scanners/ThumbnailCacheScanner.cpp
     src/scanners/ScanEngine.cpp
     src/cleaner/Cleaner.cpp
     src/cleaner/RecycleBinOps.cpp
@@ -66,6 +70,8 @@ add_executable(StorageCleaner WIN32
     src/ui/ResultsPanel.cpp
     src/ui/SettingsPanel.cpp
     src/ui/HistoryPanel.cpp
+    src/ui/FileDialogs.cpp
+    src/ui/Notifications.cpp
     resources/app.rc
 )
 

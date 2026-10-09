@@ -4,6 +4,7 @@
 #include "storagecleaner/ProgressState.h"
 #include "storagecleaner/ScanItem.h"
 #include "storagecleaner/ScanResult.h"
+#include "storagecleaner/Utils.h"
 
 #include <atomic>
 #include <mutex>
@@ -23,6 +24,14 @@ std::vector<ScanItem> ScanOldLogs(const Config&, ProgressChannel&, std::atomic<b
 std::vector<ScanItem> ScanRecycleBin(const Config&, ProgressChannel&, std::atomic<bool>& cancel);
 std::vector<ScanItem> ScanRestorePoints(const Config&, ProgressChannel&, std::atomic<bool>& cancel);
 std::vector<ScanItem> ScanOrphanedAppData(const Config&, ProgressChannel&, std::atomic<bool>& cancel);
+std::vector<ScanItem> ScanWindowsUpdateCache(const Config&, ProgressChannel&, std::atomic<bool>& cancel);
+std::vector<ScanItem> ScanCrashDumps(const Config&, ProgressChannel&, std::atomic<bool>& cancel);
+std::vector<ScanItem> ScanThumbnailCache(const Config&, ProgressChannel&, std::atomic<bool>& cancel);
+
+// Remove de `items` tudo o que a lista de pastas protegidas bloqueia (ver
+// PathExclusion.h), comparando as formas canônicas dos caminhos (8.3, relativos).
+// Faz I/O de metadados por item — chamar fora da UI thread quando a lista for grande.
+void RemoveProtectedItems(std::vector<ScanItem>& items, const std::vector<std::wstring>& excludedPaths);
 
 // Varredura leve usada em segundo plano (apenas tamanhos agregados de
 // Lixeira e temporários, sem hash de duplicados) para manter o Dashboard
@@ -30,6 +39,7 @@ std::vector<ScanItem> ScanOrphanedAppData(const Config&, ProgressChannel&, std::
 struct LightScanTotals {
     std::uint64_t tempBytes = 0;
     std::uint64_t recycleBinBytes = 0;
+    std::vector<util::DriveSpace> drives;
 };
 // Não recebe Config: não usa nenhum campo dela hoje, e evita que a worker
 // thread da varredura leve precise ler um Config que a UI thread pode estar

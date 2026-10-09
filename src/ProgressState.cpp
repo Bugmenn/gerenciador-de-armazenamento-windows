@@ -12,6 +12,9 @@ const char* PhaseLabel(Phase phase) {
         case Phase::ScanningRecycleBin:      return "Verificando a Lixeira...";
         case Phase::ScanningRestorePoints:   return "Verificando pontos de restauração...";
         case Phase::ScanningOrphanedApps:    return "Procurando dados de apps desinstalados...";
+        case Phase::ScanningWindowsUpdate:   return "Verificando cache do Windows Update...";
+        case Phase::ScanningCrashDumps:      return "Procurando despejos e relatórios de erro...";
+        case Phase::ScanningThumbnails:      return "Verificando cache de miniaturas...";
         case Phase::Cleaning:                return "Limpando itens selecionados...";
         case Phase::Done:                    return "Concluído";
         case Phase::Cancelled:               return "Cancelado";
