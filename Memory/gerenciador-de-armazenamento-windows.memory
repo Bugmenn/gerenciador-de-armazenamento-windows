@@ -11,6 +11,12 @@ foi feito — decisões e causas raiz que valem para a próxima sessão vão par
 
 ## Registro de Atividades Recentes
 
+### [2026-10-09] Corrigido o bug da checkbox da linha 0 nos Resultados (colisão de ID no ImGui)
+**O que foi feito:** O usuário observou que o clique no 1º item "aperta a coluna ao lado de Caminho" — pista que levou à causa: `TableHeadersRow()` faz `PushID(coluna)` + `TableHeader(rótulo)` (`imgui_tables.cpp:3038-3039`, v1.91.0); a coluna 0 tinha rótulo `""` e a checkbox da linha 0 era `PushID(0)` + `Checkbox("")` → mesmo ID, o cabeçalho ficava com o clique. A tentativa anterior (`TableSetupScrollFreeze`, 2026-09-11) não tinha relação. Correção: rótulos `"##sel"` (coluna) e `"##row"` (checkbox); de quebra, coluna de seleção estreita (`WidthFixed`), Caminho `WidthStretch`, Tamanho `WidthFixed`. Prova: experimento ImGui sem janela no scratchpad (mesma tabela, clique no retângulo medido da checkbox): rótulos antigos → não muda; novos → desmarca. Build 0/0, ctest 3/3. Pendente: confirmação do usuário com mouse físico.
+**Arquivos alterados:**
+- `src/ui/ResultsPanel.cpp` — rótulos/IDs e larguras da tabela
+- `CLAUDE.md` — pitfall "sem correção" trocado pela regra de IDs em tabelas
+
 ### [2026-10-08] Balão no fim de varredura manual + fila de balões + modo --test-balloons
 **O que foi feito:** O usuário não viu notificação ao escanear pela tela/bandeja com a janela fechada — por design só havia balão para varredura agendada, limpeza automática e pouco espaço (a instrução de teste dada antes estava errada). Agora: varredura manual concluída com a janela escondida ou minimizada avisa (inclusive "nada para limpar"; cancelada não); agendada também avisa com a janela minimizada; textos centralizados em `src/ui/Notifications.cpp`; **fila de balões** com 8 s entre eles (um `Shell_NotifyIcon` substitui o anterior — a regra antiga "um por Tick" não protegia o anterior, apontado pelas 2 revisões); `--test-balloons` enfileira os 6 tipos com "[Teste n/6]", liga `--dry-run` junto e para o agendador. Validado: Escanear agora com janela escondida 60 s sem foco/sem crash; teste de balões 55 s sem crash; config.json do usuário (criado pela sessão dele) com backup e restaurado com hash idêntico. **Pendente: o usuário vai rodar `--test-balloons` e os fluxos reais e reportar se os balões aparecem** (esta sessão não vê a área de trabalho).
 **Arquivos alterados:**

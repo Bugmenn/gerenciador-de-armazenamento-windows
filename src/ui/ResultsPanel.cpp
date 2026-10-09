@@ -31,9 +31,14 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders |
                               ImGuiTableFlags_ScrollY,
                           ImVec2(0, 220))) {
-        ImGui::TableSetupColumn("");
-        ImGui::TableSetupColumn("Caminho");
-        ImGui::TableSetupColumn("Tamanho");
+        // TableHeadersRow() usa PushID(coluna)+rótulo (ImGui 1.91, imgui_tables.cpp)
+        // e a checkbox usa PushID(linha)+rótulo: com "" nos dois, o cabeçalho da
+        // coluna 0 roubava o clique da linha 0. Rótulos distintos evitam isso.
+        ImGui::TableSetupColumn("##sel", ImGuiTableColumnFlags_WidthFixed,
+                                ImGui::GetFrameHeight());
+        ImGui::TableSetupColumn("Caminho", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Tamanho", ImGuiTableColumnFlags_WidthFixed,
+                                ImGui::GetFontSize() * 7.0f);
         ImGui::TableHeadersRow();
 
         for (std::size_t i = 0; i < bucket.items.size(); ++i) {
@@ -41,7 +46,7 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
             ImGui::TableSetColumnIndex(0);
             ImGui::PushID(static_cast<int>(i));
             bool isSelected = i < selected.size() && selected[i];
-            if (ImGui::Checkbox("", &isSelected) && i < selected.size()) selected[i] = isSelected;
+            if (ImGui::Checkbox("##row", &isSelected) && i < selected.size()) selected[i] = isSelected;
             ImGui::PopID();
 
             ImGui::TableSetColumnIndex(1);

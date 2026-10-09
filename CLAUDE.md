@@ -109,7 +109,7 @@ Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cl
 - **Sem `/utf-8` no MSVC:** fontes UTF-8 sem BOM são lidas na code page 1252 e todo literal acentuado (inclusive `L"..."`) sai corrompido na UI.
 - **Sem `/EHsc` no MSVC:** o `try/catch` real do projeto (ex. parsing de JSON em `HistoryStore.cpp`) fica sem garantia de unwind.
 - **Saída do `vssadmin` varia por versão/idioma do Windows:** o parser em `VssRestorePoints.cpp` é propositalmente simples (linha a linha) e pode precisar de ajuste em outras localidades.
-- **Bug conhecido, sem correção — checkbox da linha 0 em `ResultsPanel.cpp` (`DrawCategoryTable`):** o primeiro item de qualquer categoria expandida nunca responde a clique (reproduzido com mouse físico em ≥ 2 categorias). `ImGui::TableSetupScrollFreeze(0, 1)` foi testado e **revertido** — não resolveu. Não reintroduzir essa tentativa sem confirmar visualmente que funciona.
+- **IDs em tabelas ImGui:** `TableHeadersRow()` identifica o cabeçalho da coluna N como `PushID(N)` + rótulo. Widget de linha com `PushID(linha)` + o mesmo rótulo colide com o cabeçalho e perde o clique (era o "checkbox da linha 0 não marca" em `ResultsPanel.cpp`, corrigido usando `"##sel"`/`"##row"`). Nunca deixar rótulo vazio `""` em coluna nem em widget de linha.
 
 ## Skills e agentes deste projeto
 
