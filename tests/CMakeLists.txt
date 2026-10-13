@@ -24,10 +24,17 @@ add_executable(test_path_exclusion
 target_include_directories(test_path_exclusion PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME path_exclusion COMMAND test_path_exclusion)
 
+# Progresso geral por etapas (ProgressState.h, header-only): o anel de
+# progresso da UI depende de OverallFraction e de o canal preservar a etapa.
+add_executable(test_progress test_progress.cpp)
+target_include_directories(test_progress PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME progress COMMAND test_progress)
+
 # Mesma leitura de fonte do app (ver /utf-8 no CMakeLists.txt raiz): os headers
 # incluidos tem literais acentuados.
 if(MSVC)
     target_compile_options(test_duplicate_grouping PRIVATE /utf-8)
     target_compile_options(test_category_keys PRIVATE /utf-8)
     target_compile_options(test_path_exclusion PRIVATE /utf-8)
+    target_compile_options(test_progress PRIVATE /utf-8)
 endif()

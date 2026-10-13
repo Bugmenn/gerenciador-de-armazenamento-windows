@@ -25,6 +25,11 @@ public:
     // adicionadas — IFileOperation processa a fila na ordem de inserção, e
     // os callbacks Post*Item disparam nessa mesma ordem.
     std::vector<bool> succeeded;
+    // Repassa ao anel de progresso da UI o avanço real do IFileOperation
+    // (PerformOperations bloqueia até mover tudo, então é a única fonte de
+    // progresso durante essa etapa).
+    ProgressChannel* progress = nullptr;
+    ProgressSnapshot progressBase;
 
     IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
         if (riid == __uuidof(IUnknown) || riid == __uuidof(IFileOperationProgressSink)) {
@@ -68,7 +73,18 @@ public:
                                IShellItem*) override {
         return S_OK;
     }
-    IFACEMETHODIMP UpdateProgress(UINT, UINT) override { return S_OK; }
+    IFACEMETHODIMP UpdateProgress(UINT workTotal, UINT workSoFar) override {
+        if (progress && workTotal > 0) {
+            // Só avança: com pastas, o shell pode aumentar workTotal enquanto
+            // enumera os filhos, e a razão cairia — o anel andaria para trás.
+            float f = static_cast<float>(workSoFar) / static_cast<float>(workTotal);
+            if (f > progressBase.fractionComplete) {
+                progressBase.fractionComplete = f;
+                progress->Update(progressBase);
+            }
+        }
+        return S_OK;
+    }
     IFACEMETHODIMP ResetTimer() override { return S_OK; }
     IFACEMETHODIMP PauseTimer() override { return S_OK; }
     IFACEMETHODIMP ResumeTimer() override { return S_OK; }
@@ -87,7 +103,8 @@ private:
 // PerformOperations() pode retornar sucesso mesmo com itens individuais
 // falhando (ex.: arquivo aberto em outro programa).
 bool SendToRecycleBin(const std::vector<ScanItem>& items, std::vector<bool>& succeededPerItem,
-                      std::string& errorSummary) {
+                      std::string& errorSummary, ProgressChannel& progress,
+                      const ProgressSnapshot& currentSnapshot) {
     succeededPerItem.assign(items.size(), false);
     if (items.empty()) return true;
 
@@ -106,6 +123,11 @@ bool SendToRecycleBin(const std::vector<ScanItem>& items, std::vector<bool>& suc
     // AddRef, então o Release() explicito no fim devolve exatamente ao
     // balanço esperado depois do Unadvise().
     auto* sink = new DeleteProgressSink();
+    sink->progress = &progress;
+    // Parte do snapshot do Cleaner para não zerar os demais campos
+    // (itens processados etc.) enquanto o IFileOperation roda.
+    sink->progressBase = currentSnapshot;
+    sink->progressBase.fractionComplete = 0.0f;
     DWORD adviseCookie = 0;
     bool advised = SUCCEEDED(fileOp->Advise(sink, &adviseCookie));
 
@@ -185,13 +207,21 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
     std::string errorSummary;
     std::size_t failedReversibleCount = 0;
 
+    // Etapas do anel de progresso: um bloco por tipo de remoção presente.
+    const int stageCount = (reversible.empty() ? 0 : 1) + (recycleBinToEmpty.empty() ? 0 : 1) +
+                           (restorePointsToDelete.empty() ? 0 : 1);
+    int stageIndex = 0;
+    progress.SetStage(0, stageCount); // descarta a etapa de uma limpeza anterior
+
     if (!cancel.load() && !reversible.empty()) {
+        progress.SetStage(stageIndex++, stageCount);
         std::vector<bool> succeededPerItem;
         bool ranOk = true;
         if (dryRun)
             succeededPerItem.assign(reversible.size(), true);
         else
-            ranOk = SendToRecycleBin(reversible, succeededPerItem, errorSummary);
+            ranOk = SendToRecycleBin(reversible, succeededPerItem, errorSummary, progress, snapshot);
+        snapshot.fractionComplete = 1.0f;
         for (std::size_t i = 0; i < reversible.size(); ++i) {
             const ScanItem& item = reversible[i];
             bool itemSucceeded = i < succeededPerItem.size() && succeededPerItem[i];
@@ -221,6 +251,7 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
     // Esvaziar a Lixeira é permanente e definitivo (ver IsPermanentCategory);
     // por isso está isolado do caminho "reversível" acima.
     if (!recycleBinToEmpty.empty()) {
+        progress.SetStage(stageIndex++, stageCount);
         if (cancel.load()) {
             // Mesmo tratamento do bloco de restore points abaixo: sem isso,
             // itens de "Lixeira" pendentes numa limpeza cancelada sumiriam
@@ -249,7 +280,11 @@ HistoryEntry CleanItems(const std::vector<ScanItem>& selectedItems, ProgressChan
     // meio do laço" — uma guarda externa faria o primeiro caso pular o bloco
     // inteiro sem contabilizar nada em itemsSkipped.
     if (!restorePointsToDelete.empty()) {
+        progress.SetStage(stageIndex++, stageCount);
         for (std::size_t i = 0; i < restorePointsToDelete.size(); ++i) {
+            snapshot.fractionComplete =
+                static_cast<float>(i) / static_cast<float>(restorePointsToDelete.size());
+            progress.Update(snapshot);
             if (cancel.load()) {
                 // Os itens ainda nao processados nao devem virar "sucesso
                 // silencioso" no historico — sem isso, uma limpeza cancelada

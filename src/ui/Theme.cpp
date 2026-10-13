@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <string>
 
 namespace storagecleaner::ui {
@@ -151,11 +152,31 @@ void DrawCircularGauge(ImVec2 center, float radius, float thickness, float fract
 }
 
 void DrawInlineCircularGauge(float radius, float thickness, float fraction,
-                             ImU32 colorStart, ImU32 colorEnd, ImU32 trackColor) {
+                             ImU32 colorStart, ImU32 colorEnd, ImU32 trackColor,
+                             const char* centerText) {
     ImVec2 cursor = ImGui::GetCursorScreenPos();
     ImVec2 center(cursor.x + radius, cursor.y + radius);
     DrawCircularGauge(center, radius, thickness, fraction, colorStart, colorEnd, trackColor);
+    if (centerText) {
+        ImVec2 size = ImGui::CalcTextSize(centerText);
+        ImGui::GetWindowDrawList()->AddText(ImVec2(center.x - size.x * 0.5f, center.y - size.y * 0.5f),
+                                            ImGui::GetColorU32(ImGuiCol_Text), centerText);
+    }
     ImGui::Dummy(ImVec2(radius * 2.0f, radius * 2.0f));
+}
+
+void DrawProgressRing(const ProgressSnapshot& snapshot) {
+    float overall = OverallFraction(snapshot);
+    char percent[8];
+    std::snprintf(percent, sizeof(percent), "%d%%", static_cast<int>(overall * 100.0f));
+    DrawInlineCircularGauge(28.0f, 6.0f, overall, ImGui::ColorConvertFloat4ToU32(theme::kAccentBlue),
+                            ImGui::ColorConvertFloat4ToU32(theme::kAccentGold),
+                            ImGui::ColorConvertFloat4ToU32(theme::kBorder), percent);
+    if (snapshot.stageCount > 0)
+        ImGui::Text("Etapa %d de %d - %s", snapshot.stageIndex + 1, snapshot.stageCount,
+                    PhaseLabel(snapshot.phase));
+    else
+        ImGui::TextUnformatted(PhaseLabel(snapshot.phase));
 }
 
 } // namespace storagecleaner::ui

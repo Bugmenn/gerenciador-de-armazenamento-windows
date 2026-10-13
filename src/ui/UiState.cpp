@@ -65,6 +65,10 @@ void UiState::StartScan(bool triggeredByAutoClean) {
     if (scanEngine.IsRunning()) return;
     hasScanResult = false;
     currentScanIsAutoClean = triggeredByAutoClean;
+    // Zera antes de a worker começar: sem isso, o primeiro quadro mostraria o
+    // 100% da varredura anterior. Seguro: nenhuma worker usa o canal agora.
+    scanProgress.SetStage(0, 0);
+    scanProgress.Update(ProgressSnapshot{});
     scanEngine.RunAsync(config, scanProgress);
 }
 
@@ -80,6 +84,8 @@ void UiState::StartClean(const std::vector<ScanItem>& selected, bool automatic) 
     cleanCancel.store(false);
 
     if (cleanThread.joinable()) cleanThread.join();
+    cleanProgress.SetStage(0, 0);
+    cleanProgress.Update(ProgressSnapshot{});
 
     cleanThread = std::thread([this, items = selected, automatic, dryRun = dryRun,
                                excluded = config.excludedPaths]() mutable {

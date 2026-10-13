@@ -55,6 +55,12 @@ std::vector<ScanItem> ScanDuplicates(const Config& config, ProgressChannel& prog
     // candidatos plausíveis (mesmo tamanho) é viável. O agrupamento por hash
     // em si (GroupDuplicatesByHash) é uma função pura, coberta por
     // tests/test_duplicate_grouping.cpp sem depender de I/O real.
+    // Total conhecido só aqui (candidatos = arquivos com tamanho repetido):
+    // é o que permite o anel de progresso andar durante a etapa mais lenta.
+    std::uint64_t candidates = 0;
+    for (const auto& [size, paths] : bySize)
+        if (paths.size() >= 2) candidates += paths.size();
+
     for (auto& [size, paths] : bySize) {
         if (cancel.load()) break;
         if (paths.size() < 2) continue; // tamanho único: não pode ter duplicata
@@ -76,6 +82,8 @@ std::vector<ScanItem> ScanDuplicates(const Config& config, ProgressChannel& prog
 
             snapshot.itemsProcessed++;
             snapshot.currentItem = path;
+            snapshot.fractionComplete =
+                static_cast<float>(static_cast<double>(snapshot.itemsProcessed) / static_cast<double>(candidates));
             if (snapshot.itemsProcessed % 16 == 0) progress.Update(snapshot);
         }
 

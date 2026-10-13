@@ -129,12 +129,7 @@ void DrawResultsPanel(UiState& state) {
     }
 
     if (cleaning) {
-        ProgressSnapshot snapshot = state.cleanProgress.Read();
-        DrawInlineCircularGauge(28.0f, 6.0f, snapshot.fractionComplete,
-                               ImGui::ColorConvertFloat4ToU32(theme::kAccentBlue),
-                               ImGui::ColorConvertFloat4ToU32(theme::kAccentGold),
-                               ImGui::ColorConvertFloat4ToU32(theme::kBorder));
-        ImGui::TextUnformatted(PhaseLabel(snapshot.phase));
+        DrawProgressRing(state.cleanProgress.Read());
     }
 
     {

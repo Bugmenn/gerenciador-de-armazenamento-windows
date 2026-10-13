@@ -87,13 +87,26 @@ void ScanEngine::RunAsync(const Config& config, ProgressChannel& progress) {
         };
 
         const bool elevated = IsRunningElevated();
+        auto willRun = [&](Category c) {
+            return enabled(c) && !(IsAdminRequiredCategory(c) && !elevated);
+        };
+        // Cada categoria é uma etapa do anel de progresso: a maioria dos
+        // scanners não sabe o próprio total, então "categoria k de n" é o
+        // progresso geral honesto que dá para mostrar.
+        int stageCount = 0;
+        for (const ScannerEntry& scanner : kScanners)
+            if (willRun(scanner.category)) ++stageCount;
+        int stageIndex = 0;
+        progress.SetStage(0, stageCount);
+
         for (const ScannerEntry& scanner : kScanners) {
             if (cancelRequested_.load()) break;
             if (!enabled(scanner.category)) continue;
-            if (IsAdminRequiredCategory(scanner.category) && !elevated) {
+            if (!willRun(scanner.category)) {
                 result.skippedNeedAdmin.push_back(scanner.category);
                 continue;
             }
+            progress.SetStage(stageIndex++, stageCount);
             if (IsPartiallyAdminCategory(scanner.category) && !elevated)
                 result.partialNeedAdmin.push_back(scanner.category);
             AddBucket(result, scanner.category, scanner.scan(config, progress, cancelRequested_),

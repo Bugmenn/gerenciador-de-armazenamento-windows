@@ -31,11 +31,7 @@ void DrawDashboardPanel(UiState& state) {
         if (ImGui::Button("Cancelar")) state.scanEngine.RequestCancel();
 
         ProgressSnapshot snapshot = state.scanProgress.Read();
-        DrawInlineCircularGauge(28.0f, 6.0f, snapshot.fractionComplete,
-                               ImGui::ColorConvertFloat4ToU32(theme::kAccentBlue),
-                               ImGui::ColorConvertFloat4ToU32(theme::kAccentGold),
-                               ImGui::ColorConvertFloat4ToU32(theme::kBorder));
-        ImGui::TextUnformatted(PhaseLabel(snapshot.phase));
+        DrawProgressRing(snapshot);
         ImGui::TextWrapped("%s", util::WideToUtf8(snapshot.currentItem).c_str());
         ImGui::Text("Itens processados: %llu", static_cast<unsigned long long>(snapshot.itemsProcessed));
         ImGui::Text("Encontrado até agora: %s", util::FormatSize(snapshot.bytesFoundSoFar).c_str());

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storagecleaner/ProgressState.h"
+
 #include <imgui.h>
 
 namespace storagecleaner::ui {
@@ -63,8 +65,15 @@ void DrawCircularGauge(ImVec2 center, float radius, float thickness, float fract
 // calcula o centro a partir do cursor atual do ImGui e reserva o espaco no
 // layout vertical via ImGui::Dummy (o desenho em si e via ImDrawList, que
 // nao avanca o cursor sozinho). Usado nos pontos de progresso de scan/clean
-// no lugar de ImGui::ProgressBar.
+// no lugar de ImGui::ProgressBar. `centerText` (ex.: "37%") é desenhado
+// centralizado dentro do anel.
 void DrawInlineCircularGauge(float radius, float thickness, float fraction,
-                             ImU32 colorStart, ImU32 colorEnd, ImU32 trackColor);
+                             ImU32 colorStart, ImU32 colorEnd, ImU32 trackColor,
+                             const char* centerText = nullptr);
+
+// Anel de progresso de scan/limpeza com o padrão do app: progresso geral
+// (OverallFraction), "%" no centro e "Etapa k de n - <fase>" abaixo. Usado
+// pelo Painel e pelos Resultados para os dois não divergirem.
+void DrawProgressRing(const ProgressSnapshot& snapshot);
 
 } // namespace storagecleaner::ui

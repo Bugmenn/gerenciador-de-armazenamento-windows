@@ -11,6 +11,13 @@ foi feito — decisões e causas raiz que valem para a próxima sessão vão par
 
 ## Registro de Atividades Recentes
 
+### [2026-10-09] Anel de progresso passa a avançar durante varredura e limpeza
+**O que foi feito:** O usuário notou que o anel ficava parado e só enchia no fim. Causa: nenhum scanner gravava `fractionComplete` intermediário (só 1.0 no fim); o Cleaner idem. Solução: etapas no `ProgressChannel` (`SetStage`, preservadas por `Update`, que os scanners chamam sem saber a etapa) + `OverallFraction` pura (teste novo `test_progress`); ScanEngine = uma etapa por categoria que vai rodar; fração interna no hash de duplicados (candidatos conhecidos) e na limpeza (`IFileOperationProgressSink::UpdateProgress` → canal; restore points i/n); % no centro do anel e "Etapa k de n". Canal zerado em `StartScan`/`StartClean` (evita flash de 100% da execução anterior). Build 0/0, ctest 4/4, varredura completa 90 s sem crash. Limitação honesta: dentro de categoria sem total conhecido o anel fica parado até ela terminar. Pendente: confirmação visual do usuário.
+**Arquivos alterados:**
+- `include/storagecleaner/ProgressState.h`, `tests/test_progress.cpp` *(novo)*, `tests/CMakeLists.txt`
+- `src/scanners/ScanEngine.cpp`, `src/scanners/DuplicateScanner.cpp`, `src/cleaner/Cleaner.cpp`
+- `src/ui/Theme.{h,cpp}`, `src/ui/DashboardPanel.cpp`, `src/ui/ResultsPanel.cpp`, `src/ui/UiState.cpp`, `CLAUDE.md`
+
 ### [2026-10-09] Corrigido o bug da checkbox da linha 0 nos Resultados (colisão de ID no ImGui)
 **O que foi feito:** O usuário observou que o clique no 1º item "aperta a coluna ao lado de Caminho" — pista que levou à causa: `TableHeadersRow()` faz `PushID(coluna)` + `TableHeader(rótulo)` (`imgui_tables.cpp:3038-3039`, v1.91.0); a coluna 0 tinha rótulo `""` e a checkbox da linha 0 era `PushID(0)` + `Checkbox("")` → mesmo ID, o cabeçalho ficava com o clique. A tentativa anterior (`TableSetupScrollFreeze`, 2026-09-11) não tinha relação. Correção: rótulos `"##sel"` (coluna) e `"##row"` (checkbox); de quebra, coluna de seleção estreita (`WidthFixed`), Caminho `WidthStretch`, Tamanho `WidthFixed`. Prova: experimento ImGui sem janela no scratchpad (mesma tabela, clique no retângulo medido da checkbox): rótulos antigos → não muda; novos → desmarca. Build 0/0, ctest 3/3. Pendente: confirmação do usuário com mouse físico.
 **Arquivos alterados:**

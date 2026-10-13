@@ -203,7 +203,7 @@ percentual configurado — uma vez por queda, não a cada varredura.
 ## Testes
 
 ```powershell
-cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion
+cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion test_progress
 ctest --test-dir build
 ```
 
