@@ -1,6 +1,9 @@
 #pragma once
 
 #include "storagecleaner/ProgressState.h"
+#include "storagecleaner/ScanItem.h"
+
+#include <cstdint>
 
 #include <imgui.h>
 
@@ -23,6 +26,29 @@ inline constexpr ImVec4 kAccentGold  = ImVec4(0xFF / 255.f, 0xD5 / 255.f, 0x4F /
 inline constexpr ImVec4 kSuccess     = ImVec4(0x4C / 255.f, 0xAF / 255.f, 0x80 / 255.f, 1.f);
 inline constexpr ImVec4 kWarning     = ImVec4(0xE8 / 255.f, 0xA3 / 255.f, 0x3D / 255.f, 1.f);
 inline constexpr ImVec4 kDanger      = ImVec4(0xE5 / 255.f, 0x60 / 255.f, 0x5A / 255.f, 1.f);
+
+// Cor de cada categoria na rosca dos Resultados, na legenda e no cabeçalho da
+// categoria — mesma cor nos três para o olho ligar fatia e lista. Matizes bem
+// separados entre si; o switch sem default faz o compilador avisar quando
+// surgir categoria nova sem cor.
+inline ImVec4 CategoryColor(Category c) {
+    auto rgb = [](unsigned v) {
+        return ImVec4(((v >> 16) & 0xFF) / 255.f, ((v >> 8) & 0xFF) / 255.f, (v & 0xFF) / 255.f, 1.f);
+    };
+    switch (c) {
+        case Category::TempFiles:          return rgb(0x4FA3F7);
+        case Category::BrowserCache:       return rgb(0x2DD4BF);
+        case Category::Duplicate:          return rgb(0xA78BFA);
+        case Category::OldLogs:            return rgb(0xF472B6);
+        case Category::RecycleBin:         return rgb(0xF87171);
+        case Category::RestorePoints:      return rgb(0xFB923C);
+        case Category::OrphanedApps:       return rgb(0xFACC15);
+        case Category::WindowsUpdateCache: return rgb(0x4ADE80);
+        case Category::CrashDumps:         return rgb(0x7DD3FC);
+        case Category::ThumbnailCache:     return rgb(0xD6B38A);
+    }
+    return kTextMuted;
+}
 
 } // namespace theme
 
@@ -70,6 +96,24 @@ void DrawCircularGauge(ImVec2 center, float radius, float thickness, float fract
 void DrawInlineCircularGauge(float radius, float thickness, float fraction,
                              ImU32 colorStart, ImU32 colorEnd, ImU32 trackColor,
                              const char* centerText = nullptr);
+
+// Rosca particionada: uma fatia por valor, proporcional, a partir das 12h em
+// sentido horário, com um pequeno vão entre fatias. Fatias com valor > 0 mas
+// minúsculas ganham um arco mínimo visível (tirado das maiores). A fatia sob
+// o mouse é desenhada mais grossa e seu índice é devolvido (-1 se nenhuma) —
+// o chamador mostra o tooltip. Fatias com valor 0 não aparecem.
+struct DonutSlice {
+    std::uint64_t value = 0;
+    ImU32 color = 0;
+};
+int DrawSegmentedDonut(ImVec2 center, float radius, float thickness, const DonutSlice* slices,
+                       int count, ImU32 trackColor, ImDrawList* drawList = nullptr);
+
+// Versão de fluxo de layout (como DrawInlineCircularGauge): centro a partir
+// do cursor, reserva o espaço com ImGui::Dummy. `outCenter` recebe o centro,
+// para o chamador escrever no meio da rosca.
+int DrawInlineSegmentedDonut(float radius, float thickness, const DonutSlice* slices, int count,
+                             ImU32 trackColor, ImVec2* outCenter = nullptr);
 
 // Anel de progresso de scan/limpeza com o padrão do app: progresso geral
 // (OverallFraction), "%" no centro e "Etapa k de n - <fase>" abaixo. Usado

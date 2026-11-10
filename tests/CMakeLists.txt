@@ -30,6 +30,16 @@ add_executable(test_progress test_progress.cpp)
 target_include_directories(test_progress PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME progress COMMAND test_progress)
 
+# Agrupamento/filtro/ordenacao da aba Resultados e bytes limpaveis por
+# unidade (ItemGrouping.h): a lista agrupada e a rosca das unidades dependem disso.
+add_executable(test_item_grouping
+    test_item_grouping.cpp
+    ${CMAKE_SOURCE_DIR}/src/ItemGrouping.cpp
+    ${CMAKE_SOURCE_DIR}/src/PathExclusion.cpp
+)
+target_include_directories(test_item_grouping PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME item_grouping COMMAND test_item_grouping)
+
 # Mesma leitura de fonte do app (ver /utf-8 no CMakeLists.txt raiz): os headers
 # incluidos tem literais acentuados.
 if(MSVC)
@@ -37,4 +47,7 @@ if(MSVC)
     target_compile_options(test_category_keys PRIVATE /utf-8)
     target_compile_options(test_path_exclusion PRIVATE /utf-8)
     target_compile_options(test_progress PRIVATE /utf-8)
+    # /EHsc: ItemGrouping.h inclui ScanResult.h (<chrono>), que exige
+    # semantica de excecao (C4530 sem a flag).
+    target_compile_options(test_item_grouping PRIVATE /utf-8 /EHsc)
 endif()

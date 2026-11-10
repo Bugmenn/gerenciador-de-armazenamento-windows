@@ -196,22 +196,38 @@ automática simulada não adia a próxima limpeza automática real.
 
 Na aba Configurações dá para proteger pastas: nada dentro delas é oferecido
 para limpeza, nem uma pasta que as contenha (apagar a pasta-pai levaria a
-protegida junto). O Painel mostra o espaço livre de cada unidade fixa ou
-removível, e um balão na bandeja avisa quando uma unidade fixa cai abaixo do
+protegida junto). O Painel mostra cada unidade fixa ou removível numa rosca
+dividida em uso / encontrado para limpar na última varredura (dourado) /
+livre, e um balão na bandeja avisa quando uma unidade fixa cai abaixo do
 percentual configurado — uma vez por queda, não a cada varredura.
+
+## Aba Resultados
+
+No topo, uma rosca com uma fatia colorida por categoria e a legenda ao lado
+(tamanho e % do total); passar o mouse mostra detalhes e clicar abre a
+categoria. Cada categoria lista os itens **agrupados por pasta** (pasta com o
+total, expansível; o nome do arquivo em destaque e o caminho completo no
+tooltip), ordenáveis por nome ou tamanho pelo cabeçalho. Um filtro por texto
+(nome ou pasta) e por tamanho mínimo vale para todas as categorias; o
+checkbox da pasta marca/desmarca a pasta inteira. Com filtro ativo, o rodapé
+avisa quando há itens selecionados fora do que está à vista.
 
 ## Testes
 
 ```powershell
-cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion test_progress
+cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion test_progress test_item_grouping
 ctest --test-dir build
 ```
 
-Só o agrupamento de duplicados (`tests/test_duplicate_grouping.cpp`) e as
-chaves de persistência das categorias (`tests/test_category_keys.cpp`) são
-testáveis fora do Windows, porque são as únicas peças de lógica sem
-dependência de API do Windows — o restante (scanners, config, histórico)
-depende de Win32/COM/VSS e só builda numa máquina Windows real.
+Os testes cobrem só a lógica sem dependência de API do Windows (agrupamento
+de duplicados, chaves de categoria, pastas protegidas, progresso e o
+agrupamento/filtro da aba Resultados) — o restante (scanners, config,
+histórico) depende de Win32/COM/VSS e só builda numa máquina Windows real.
+
+Para a interface, `StorageCleaner.exe --ui-selftest <pasta>` roda um roteiro
+automático com dados fictícios, sem mostrar janela, sem ler/gravar a
+configuração e sem excluir nada: salva um PNG de cada tela e um `report.txt`
+com as conferências; o código de saída é o número de falhas.
 
 ## Verificado
 

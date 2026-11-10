@@ -1,13 +1,15 @@
-# CLAUDE.md — gerenciador-de-armazenamento-windows
+# CLAUDE.md
 
-Guia para o Claude Code neste repositório.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Projeto: **gerenciador-de-armazenamento-windows** (app "Otimizador de Armazenamento"). Texto em pt-BR.
 
 ## Leitura obrigatória ao iniciar
 
-Antes de qualquer tarefa, ler nesta ordem:
-1. Memória do agente (`~/.claude/projects/c--Users-gabri--rea-de-Trabalho-gerenciador-de-armazenamento-windows/memory/MEMORY.md`) — preferências do usuário, carregada automaticamente
-2. `Memory/gerenciador-de-armazenamento-windows.memory` — histórico do que foi feito (Regra 12 global)
-3. `README.md` — visão funcional (categorias varridas, segundo plano/bandeja, agendamento), quando a tarefa tocar comportamento do app
+A memória do agente (preferências do usuário) já é carregada automaticamente. Antes de qualquer tarefa, ler também:
+1. `Memory/gerenciador-de-armazenamento-windows.memory` — histórico do que foi feito (Regra 12 global)
+2. `README.md` — visão funcional (categorias varridas, segundo plano/bandeja, agendamento), quando a tarefa tocar comportamento do app
+3. `.claude/docs/<dominio>.md` da tabela "Documentação por domínio", quando a tarefa tocar aquele domínio
 
 Regras gerais de processo estão no `CLAUDE.md` global — não duplicar aqui. O que segue é específico deste repositório.
 
@@ -23,7 +25,16 @@ O hook `UserPromptSubmit` em `.claude/settings.json` (versionado) injeta a cada 
 
 ## Comandos essenciais
 
-Build (MSVC, dentro do Visual Studio ou de um "Developer PowerShell"):
+**Nesta máquina** o build existente é o do Visual Studio "Abrir Pasta" (Ninja): `out\build\x64-Debug` e `out\build\x64-Release` — é nele que a receita "Build real via PowerShell" abaixo roda. `ctest` não está no PATH fora de um Developer Prompt:
+```powershell
+$vsCMake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+& "$vsCMake\ctest.exe" --test-dir out\build\x64-Debug                       # todos
+& "$vsCMake\ctest.exe" --test-dir out\build\x64-Debug -R item_grouping      # um só
+out\build\x64-Debug\StorageCleaner.exe --ui-selftest <pasta>                # UI automática
+```
+No Visual Studio, `.vs/launch.vs.json` (local, gitignored) tem perfis "Modo teste (simulação)" (`--dry-run`), "Teste automático da UI" e "Teste dos balões da bandeja".
+
+Build genérico (MSVC, dentro do Visual Studio ou de um "Developer PowerShell"):
 ```powershell
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
@@ -35,14 +46,16 @@ cmake -B build -G "MinGW Makefiles"
 cmake --build build
 ```
 
-Testes (`test_duplicate_grouping`, `test_category_keys`, `test_path_exclusion` e `test_progress` — só lógica sem dependência de Win32/COM/VSS):
+Testes (`test_duplicate_grouping`, `test_category_keys`, `test_path_exclusion`, `test_progress` e `test_item_grouping` — só lógica sem dependência de Win32/COM/VSS):
 ```powershell
-cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion test_progress
+cmake --build build --target test_duplicate_grouping test_category_keys test_path_exclusion test_progress test_item_grouping
 ctest --test-dir build                          # todos os testes
 ctest --test-dir build -R duplicate_grouping     # um teste específico
 ```
 
-**Estado limpo da suíte:** 4 testes (`duplicate_grouping`, `category_keys`, `path_exclusion`, `progress`), 0 falhas pré-existentes. Conferir na saída do `ctest` que todos de fato executaram (`100% tests passed, 0 tests failed out of 4`).
+**Estado limpo da suíte:** 5 testes (`duplicate_grouping`, `category_keys`, `path_exclusion`, `progress`, `item_grouping`), 0 falhas pré-existentes. Conferir na saída do `ctest` que todos de fato executaram (`100% tests passed, 0 tests failed out of 5`).
+
+**Validação visual automática:** `StorageCleaner.exe --ui-selftest <pasta>` — dados fictícios (`src/ui/SelfTest.cpp`), janela escondida, não lê/grava `config.json`/`history.json`, pula o mutex de instância única (roda com o app do usuário aberto), força dry-run; salva `NN-passo.png` lido do back buffer DX11 + `report.txt` (PASS/FALHA); exit code = nº de falhas. Abrir os PNGs com a tool Read. Tela/ação nova na UI → acrescentar passo + asserção ao roteiro (`SelfTest::BuildScript`), chamando os mesmos métodos de `UiState` que o painel chama.
 
 Subir a aplicação: `build\Release\StorageCleaner.exe` (MSVC) ou `build\StorageCleaner.exe` (MinGW/Ninja); `--startup` abre direto na bandeja; `--dry-run` liga o modo simulação (nenhuma limpeza exclui nada — **único modo permitido para testar limpeza nesta máquina**, ver memória do agente); `--test-balloons` mostra os 6 balões da bandeja em sequência (8 s cada) para o usuário conferir visualmente — esta sessão não enxerga a área de trabalho. Textos dos balões só em `src/ui/Notifications.cpp`. Rodar como Administrador para incluir pontos de restauração e cache do Windows Update.
 
@@ -76,10 +89,10 @@ Otimizador/limpador de armazenamento para Windows: app desktop que varre o disco
 
 Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cleaner` → `include/storagecleaner`):
 
-- **`include/storagecleaner/`** — modelo de dados e contratos compartilhados, independentes de UI: `ScanItem`/`Category` (`IsPermanentCategory`, `IsHeuristicCategory`), `Config` (inclui `SanitizeConfig()`), `ScanResult`, `HistoryEntry`, `ProgressState` (`ProgressChannel`, canal de progresso thread-safe via mutex+snapshot), `Scanner.h` (assinatura comum dos scanners + `ScanEngine`), `Cleaner.h`, `ConfigStore.h`/`HistoryStore.h` (persistência JSON em `%APPDATA%\StorageCleaner\`, escrita atômica via `.tmp` + `MoveFileExW`). `DuplicateGrouping.h`, `PathExclusion.h` (pastas protegidas), `OverallFraction`/`ProgressChannel` de `ProgressState.h` e as funções de categoria de `ScanItem.h` são as únicas lógicas 100% livres de Win32 — por isso são as únicas testáveis sem toolchain Windows.
-- **`src/scanners/`** — um scanner por categoria, todos com a mesma assinatura (`Config`, `ProgressChannel&`, `std::atomic<bool>& cancel`), orquestrados sequencialmente por `ScanEngine` (`ScanEngine.cpp`) numa worker thread própria a partir da tabela `kScanners` (um `static_assert` exige uma linha por categoria). O `ScanEngine` também pula categorias de `IsAdminRequiredCategory` sem elevação (vão para `ScanResult::skippedNeedAdmin`) e aplica a lista de pastas protegidas em `AddBucket` — **categoria nova** = enum + `kAllCategories` + `CategoryName`/`CategoryKey` + `Phase`/`PhaseLabel` + scanner + linha em `kScanners` + `CMakeLists.txt` + chave em `tests/test_category_keys.cpp`.
+- **`include/storagecleaner/`** — modelo de dados e contratos compartilhados, independentes de UI: `ScanItem`/`Category` (`IsPermanentCategory`, `IsHeuristicCategory`), `Config` (inclui `SanitizeConfig()`), `ScanResult`, `HistoryEntry`, `ProgressState` (`ProgressChannel`, canal de progresso thread-safe via mutex+snapshot), `Scanner.h` (assinatura comum dos scanners + `ScanEngine`), `Cleaner.h`, `ConfigStore.h`/`HistoryStore.h` (persistência JSON em `%APPDATA%\StorageCleaner\`, escrita atômica via `.tmp` + `MoveFileExW`). `DuplicateGrouping.h`, `PathExclusion.h` (pastas protegidas), `ItemGrouping.h` (agrupamento/filtro/ordenação da aba Resultados, bytes por unidade), `OverallFraction`/`ProgressChannel` de `ProgressState.h` e as funções de categoria de `ScanItem.h` são as únicas lógicas 100% livres de Win32 — por isso são as únicas testáveis sem toolchain Windows.
+- **`src/scanners/`** — um scanner por categoria, todos com a mesma assinatura (`Config`, `ProgressChannel&`, `std::atomic<bool>& cancel`), orquestrados sequencialmente por `ScanEngine` (`ScanEngine.cpp`) numa worker thread própria a partir da tabela `kScanners` (um `static_assert` exige uma linha por categoria). O `ScanEngine` também pula categorias de `IsAdminRequiredCategory` sem elevação (vão para `ScanResult::skippedNeedAdmin`) e aplica a lista de pastas protegidas em `AddBucket` — **categoria nova** = enum + `kAllCategories` + `CategoryName`/`CategoryKey` + `Phase`/`PhaseLabel` + scanner + linha em `kScanners` + `CMakeLists.txt` + chave em `tests/test_category_keys.cpp` + cor em `theme::CategoryColor` (`Theme.h`) + item no fixture de `src/ui/SelfTest.cpp`.
 - **`src/cleaner/`** — `Cleaner.cpp` decide, por categoria, se a exclusão é reversível (via `IFileOperation` + Lixeira, com `IFileOperationProgressSink` para saber item a item se a remoção realmente aconteceu) ou permanente (esvaziar a Lixeira, remover shadow copy via `vssadmin`). `CleanItems` é o **único ponto do app que exclui algo** — o `dryRun` (`--dry-run`) é verificado ali; qualquer caminho novo de exclusão precisa passar por ele ou respeitar a mesma flag.
-- **`src/ui/`** — Dear ImGui: `App.cpp` (bootstrap Win32+DX11+ImGui, loop principal, ícone na bandeja), `UiState.*` (todo o estado mutável de UI: seleção de itens, varredura leve em thread própria, agendamento de auto-clean — `Tick()` roda uma vez por frame e concentra essa lógica fora dos `*Panel.cpp`, que só desenham), painéis por aba (`DashboardPanel`, `ResultsPanel`, `SettingsPanel`, `HistoryPanel`), `TrayIcon.*` (bandeja + auto-início via registro do Windows), `Theme.h`/`Theme.cpp` (paleta central `theme::k*`, `ApplyTheme()`/`LoadFonts()` chamados uma vez em `RunApp()`, `AppFonts` guardado em `UiState::fonts`, e `DrawCircularGauge`/`DrawInlineCircularGauge` — gauge circular customizado via `ImDrawList` que substitui `ImGui::ProgressBar` nos pontos de progresso de scan/clean).
+- **`src/ui/`** — Dear ImGui: `App.cpp` (bootstrap Win32+DX11+ImGui, loop principal, ícone na bandeja), `UiState.*` (todo o estado mutável de UI: seleção de itens, varredura leve em thread própria, agendamento de auto-clean — `Tick()` roda uma vez por frame e concentra essa lógica fora dos `*Panel.cpp`, que só desenham), painéis por aba (`DashboardPanel`, `ResultsPanel`, `SettingsPanel`, `HistoryPanel`), `TrayIcon.*` (bandeja + auto-início via registro do Windows), `Theme.h`/`Theme.cpp` (paleta central `theme::k*`, `ApplyTheme()`/`LoadFonts()` chamados uma vez em `RunApp()`, `AppFonts` guardado em `UiState::fonts`, `DrawCircularGauge`/`DrawInlineCircularGauge` — gauge circular customizado via `ImDrawList` que substitui `ImGui::ProgressBar` nos pontos de progresso de scan/clean — e `DrawSegmentedDonut`/`DrawInlineSegmentedDonut`, rosca particionada das roscas de categoria e de unidade). A lista agrupada dos Resultados vive em `UiState::BucketView` (cache por categoria; chamar `OnResultChanged()` ao alterar `lastScanResult`), desenhada com `ImGuiListClipper`. `SelfTest.*` = modo `--ui-selftest`. Invariantes e pitfalls desta camada: `.claude/docs/ui-imgui.md`.
 - **`resources/`** — recurso Win32 do executável: `app.ico` (multi-resolução), `app.rc` e `resource.h` (`IDI_APP_ICON`, compartilhado entre o `.rc` e o C++ via `#include "resource.h"`). Usado por `App.cpp` (janela/taskbar) e `TrayIcon.cpp` (bandeja) via `LoadImageW(..., MAKEINTRESOURCEW(IDI_APP_ICON), ...)`.
 
 **Categorias reversíveis vs. permanentes** (`IsPermanentCategory` em `ScanItem.h`): temp, cache, duplicados, logs, dados órfãos, cache do Windows Update, despejos de erro e miniaturas vão para a Lixeira; só Lixeira (esvaziar) e pontos de restauração são permanentes. "Dados órfãos" é heurística (`IsHeuristicCategory`): desabilitada por padrão, nunca pré-selecionada, nunca entra na limpeza automática mesmo se habilitada.
@@ -102,14 +115,14 @@ Três camadas, com dependência sempre em uma direção (`ui` → `scanners`/`cl
 ## Pitfalls conhecidos
 
 - **Só compila/executa em Windows:** a tool **Bash** pode rodar num ambiente sem toolchain Windows (só dá pra rodar os testes de `tests/`); a tool **PowerShell** roda na máquina Windows real e compila o projeto inteiro via `VsDevCmd.bat` (ver "Build real via PowerShell"). Preferir build real a revisão só por leitura.
-- **A tool PowerShell não enxerga a janela do app:** `CopyFromScreen` falha ("identificador inválido") e `PrintWindow` devolve o cliente DX11 em branco — a validação visual da UI tem de ser feita pelo usuário. Dá para medir pelo PowerShell (só leitura) as pastas que um scanner vai encontrar, e controlar a janela por Win32: `GetWindowRect`/`SetWindowPos`/`ShowWindow` funcionam, e `PostMessage(hwnd, WM_COMMAND, 3, 0)` (= "Sair" da bandeja, `kMenuExit`) encerra o app **pelo caminho normal** (grava a janela no config.json; `Stop-Process` não grava). Com `--startup` a janela nasce escondida e `MainWindowHandle` vem 0 — achar o hwnd com `EnumWindows` filtrando pelo PID.
-- **Barras invertidas em heredoc pela tool Bash:** escapes como `L'\\'` chegam corrompidos (viram `L'\'` e um byte NUL) ao editar C++ via `python - <<EOF` — para trechos com `\`, usar a tool Edit.
+- **A tool PowerShell não enxerga a janela do app:** `CopyFromScreen` falha ("identificador inválido") e `PrintWindow` devolve o cliente DX11 em branco — para validar a UI, usar `--ui-selftest` (captura o back buffer por dentro do processo). Dá para medir pelo PowerShell (só leitura) as pastas que um scanner vai encontrar, e controlar a janela por Win32: `GetWindowRect`/`SetWindowPos`/`ShowWindow` funcionam, e `PostMessage(hwnd, WM_COMMAND, 3, 0)` (= "Sair" da bandeja, `kMenuExit`) encerra o app **pelo caminho normal** (grava a janela no config.json; `Stop-Process` não grava). Com `--startup` a janela nasce escondida e `MainWindowHandle` vem 0 — achar o hwnd com `EnumWindows` filtrando pelo PID.
+- **Heredoc pela tool Bash:** escapes como `L'\\'` chegam corrompidos (viram `L'\'` e um byte NUL) ao editar C++ via `python - <<EOF`, e um script longo assim já falhou com "unexpected EOF" — para trechos com `\`, usar a tool Edit; para edição em lote, gravar o script no scratchpad (Write) e rodar `python -I <arquivo>`.
+- **Quebra de linha mista:** parte dos fontes é CRLF e parte LF (ex.: `Theme.cpp`/`Theme.h` LF, `UiState.*`/`ResultsPanel.cpp` CRLF). Ao reescrever um arquivo inteiro (Write/script), manter a quebra original e conferir `git diff --stat` — contagem perto do total do arquivo = quebra trocada.
 - **Sem `UNICODE`/`_UNICODE`:** macros genéricas de recurso do Win32 (ex. `IDI_APPLICATION`) resolvem para `LPSTR` e quebram chamadas `...W`.
 - **Sem `NOMINMAX`:** `windows.h` define macros `max`/`min` que colidem com `std::max`/`std::min`.
 - **Sem `/utf-8` no MSVC:** fontes UTF-8 sem BOM são lidas na code page 1252 e todo literal acentuado (inclusive `L"..."`) sai corrompido na UI.
 - **Sem `/EHsc` no MSVC:** o `try/catch` real do projeto (ex. parsing de JSON em `HistoryStore.cpp`) fica sem garantia de unwind.
 - **Saída do `vssadmin` varia por versão/idioma do Windows:** o parser em `VssRestorePoints.cpp` é propositalmente simples (linha a linha) e pode precisar de ajuste em outras localidades.
-- **IDs em tabelas ImGui:** `TableHeadersRow()` identifica o cabeçalho da coluna N como `PushID(N)` + rótulo. Widget de linha com `PushID(linha)` + o mesmo rótulo colide com o cabeçalho e perde o clique (era o "checkbox da linha 0 não marca" em `ResultsPanel.cpp`, corrigido usando `"##sel"`/`"##row"`). Nunca deixar rótulo vazio `""` em coluna nem em widget de linha.
 
 ## Skills e agentes deste projeto
 
@@ -132,7 +145,11 @@ Replicados de `github.com/Bugmenn/claude` em `.claude/skills/` e `.claude/agents
 
 ## Documentação por domínio (`.claude/docs/`)
 
-Ainda não há. Quando os pitfalls de um domínio (ex.: UI ImGui, VSS/limpeza) passarem de meia dúzia de linhas, mover para `.claude/docs/<dominio>.md` e deixar aqui só a linha da tabela.
+| Arquivo | Abrir quando |
+|---|---|
+| `.claude/docs/ui-imgui.md` | mexer em `src/ui/`: tabelas (IDs, seta de ordenação, tri-estado), lista agrupada `BucketView`, roscas, roteiro do `--ui-selftest` |
+
+Quando os pitfalls de outro domínio (ex.: VSS/limpeza) passarem de meia dúzia de linhas, mover para `.claude/docs/<dominio>.md` e acrescentar a linha aqui.
 
 ## Credenciais locais
 

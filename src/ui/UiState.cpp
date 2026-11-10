@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <iterator>
 
 namespace storagecleaner::ui {
 
@@ -178,6 +179,154 @@ void UiState::ApplyExclusionsToLastResult() {
         bucket.items = std::move(keptItems);
         sel = std::move(keptSel);
     }
+    OnResultChanged();
+}
+
+void UiState::AdoptScanResult(ScanResult result) {
+    lastScanResult = std::move(result);
+    selection.assign(lastScanResult.buckets.size(), {});
+    for (std::size_t i = 0; i < lastScanResult.buckets.size(); ++i) {
+        bool preselect = !IsHeuristicCategory(lastScanResult.buckets[i].category);
+        selection[i].assign(lastScanResult.buckets[i].items.size(), preselect);
+    }
+    // Varredura nova: pastas voltam a fechar, mas a ordenação escolhida
+    // fica — a tabela do ImGui guarda a seta do cabeçalho e não seria
+    // avisada de um reset aqui.
+    for (auto& view : bucketViews) view.toggledFolders.clear();
+    OnResultChanged();
+    hasScanResult = true;
+    // Só a varredura manual troca de aba: a agendada não pode tirar o
+    // usuário do que ele estiver fazendo (ex.: digitando nas Configurações).
+    if (!currentScanIsAutoClean) requestedTab = 1;
+}
+
+void UiState::OnResultChanged() {
+    ++resultVersion;
+    // Preserva ordenação e pastas abertas de cada categoria: o resultado
+    // mudou (ex.: exclusões aplicadas), mas o usuário continua na mesma tela.
+    bucketViews.resize(lastScanResult.buckets.size());
+    cleanableByDrive = CleanableBytesByDrive(lastScanResult.buckets);
+}
+
+ItemFilter UiState::CurrentItemFilter() const {
+    ItemFilter filter;
+    // Chamado várias vezes por linha desenhada: só reconverte quando o texto muda.
+    if (filterUtf8Cache != resultsFilter) {
+        filterUtf8Cache = resultsFilter;
+        filterWideCache = util::Utf8ToWide(filterUtf8Cache);
+    }
+    filter.needle = filterWideCache;
+    int idx = std::clamp(resultsMinSizeIdx, 0, static_cast<int>(std::size(kMinSizeOptions)) - 1);
+    filter.minBytes = kMinSizeOptions[idx].bytes;
+    return filter;
+}
+
+bool UiState::IsFilterActive() const { return resultsFilter[0] != '\0' || resultsMinSizeIdx > 0; }
+
+bool UiState::IsGroupOpen(const BucketView& view, std::size_t groupIdx) const {
+    if (groupIdx >= view.groups.size()) return false;
+    bool openByDefault = resultsFilter[0] != '\0';
+    return openByDefault != (view.toggledFolders.count(view.groups[groupIdx].folder) > 0);
+}
+
+BucketView& UiState::GetBucketView(std::size_t bucketIdx) {
+    if (bucketViews.size() < lastScanResult.buckets.size())
+        bucketViews.resize(lastScanResult.buckets.size());
+    BucketView& view = bucketViews[bucketIdx];
+    ItemFilter filter = CurrentItemFilter();
+    if (view.builtVersion != resultVersion || view.builtNeedle != filter.needle ||
+        view.builtMinBytes != filter.minBytes || view.builtSortKey != view.sortKey ||
+        view.builtSortDescending != view.sortDescending) {
+        // O padrão aberto/fechado muda com o texto do filtro; inversões
+        // feitas sob o padrão anterior não valem mais.
+        if (view.builtNeedle.empty() != filter.needle.empty()) view.toggledFolders.clear();
+        view.groups = GroupItemsByFolder(lastScanResult.buckets[bucketIdx].items, filter,
+                                         view.sortKey, view.sortDescending);
+        view.visibleItems = 0;
+        for (const auto& group : view.groups) view.visibleItems += group.itemIndices.size();
+        view.builtVersion = resultVersion;
+        view.builtNeedle = std::move(filter.needle);
+        view.builtMinBytes = filter.minBytes;
+        view.builtSortKey = view.sortKey;
+        view.builtSortDescending = view.sortDescending;
+        view.rowsDirty = true;
+    }
+    if (view.rowsDirty) {
+        view.rows.clear();
+        for (std::size_t g = 0; g < view.groups.size(); ++g) {
+            const ItemGroup& group = view.groups[g];
+            if (group.itemIndices.size() == 1) {
+                view.rows.push_back(ResultRow{g, group.itemIndices[0]});
+                continue;
+            }
+            view.rows.push_back(ResultRow{g, ResultRow::kGroupRow});
+            if (IsGroupOpen(view, g))
+                for (std::size_t i : group.itemIndices) view.rows.push_back(ResultRow{g, i});
+        }
+        view.rowsDirty = false;
+    }
+    return view;
+}
+
+void UiState::ToggleGroup(std::size_t bucketIdx, std::size_t groupIdx) {
+    BucketView& view = GetBucketView(bucketIdx);
+    if (groupIdx >= view.groups.size()) return;
+    const std::wstring& folder = view.groups[groupIdx].folder;
+    if (!view.toggledFolders.erase(folder)) view.toggledFolders.insert(folder);
+    view.rowsDirty = true;
+}
+
+void UiState::SetGroupSelected(std::size_t bucketIdx, std::size_t groupIdx, bool selected) {
+    BucketView& view = GetBucketView(bucketIdx);
+    if (groupIdx >= view.groups.size() || bucketIdx >= selection.size()) return;
+    auto& sel = selection[bucketIdx];
+    for (std::size_t i : view.groups[groupIdx].itemIndices)
+        if (i < sel.size()) sel[i] = selected;
+}
+
+void UiState::SetVisibleSelected(std::size_t bucketIdx, bool selected) {
+    BucketView& view = GetBucketView(bucketIdx);
+    for (std::size_t g = 0; g < view.groups.size(); ++g) SetGroupSelected(bucketIdx, g, selected);
+}
+
+namespace {
+
+TriState CountToTriState(std::size_t marked, std::size_t total) {
+    if (total == 0 || marked == 0) return TriState::None;
+    return marked == total ? TriState::All : TriState::Some;
+}
+
+} // namespace
+
+TriState UiState::GroupSelectionState(std::size_t bucketIdx, std::size_t groupIdx) {
+    BucketView& view = GetBucketView(bucketIdx);
+    if (groupIdx >= view.groups.size() || bucketIdx >= selection.size()) return TriState::None;
+    const auto& sel = selection[bucketIdx];
+    std::size_t marked = 0;
+    for (std::size_t i : view.groups[groupIdx].itemIndices)
+        if (i < sel.size() && sel[i]) ++marked;
+    return CountToTriState(marked, view.groups[groupIdx].itemIndices.size());
+}
+
+TriState UiState::VisibleSelectionState(std::size_t bucketIdx) {
+    BucketView& view = GetBucketView(bucketIdx);
+    if (bucketIdx >= selection.size()) return TriState::None;
+    const auto& sel = selection[bucketIdx];
+    std::size_t marked = 0;
+    for (const auto& group : view.groups)
+        for (std::size_t i : group.itemIndices)
+            if (i < sel.size() && sel[i]) ++marked;
+    return CountToTriState(marked, view.visibleItems);
+}
+
+void UiState::SetResultsSort(std::size_t bucketIdx, ItemSortKey key, bool descending, bool fromHeader) {
+    if (bucketViews.size() < lastScanResult.buckets.size())
+        bucketViews.resize(lastScanResult.buckets.size());
+    if (bucketIdx >= bucketViews.size()) return;
+    BucketView& view = bucketViews[bucketIdx];
+    view.sortKey = key;
+    view.sortDescending = descending;
+    if (!fromHeader) view.sortChangedExternally = true;
 }
 
 void UiState::EnqueueBalloonTest() {
@@ -203,14 +352,7 @@ void UiState::Tick() {
     // (todas as categorias, exceto as heurísticas, já vêm marcadas).
     ScanResult freshResult;
     if (scanEngine.TryTakeResult(freshResult)) {
-        lastScanResult = std::move(freshResult);
-        selection.assign(lastScanResult.buckets.size(), {});
-        for (std::size_t i = 0; i < lastScanResult.buckets.size(); ++i) {
-            bool preselect = !IsHeuristicCategory(lastScanResult.buckets[i].category);
-            selection[i].assign(lastScanResult.buckets[i].items.size(), preselect);
-        }
-        hasScanResult = true;
-        activeTab = 1; // pula para a aba Resultados
+        AdoptScanResult(std::move(freshResult));
 
         if (currentScanIsAutoClean && config.autoCleanMode == AutoCleanMode::AutoDelete) {
             // Disparo automático em modo "excluir sem perguntar": limpa direto,
@@ -248,6 +390,16 @@ void UiState::Tick() {
         }
     }
 
+    // Limpeza real concluída: a parte "limpável" de cada unidade (rosca do
+    // Painel) deixou de existir — zera em vez de afirmar um valor velho.
+    bool cleaningNow = cleaning.load();
+    if (cleanWasRunning && !cleaningNow) {
+        std::lock_guard<std::mutex> lock(cleanResultMutex);
+        if (pendingCleanResult && !pendingCleanResult->wasDryRun && pendingCleanResult->totalBytesFreed > 0)
+            cleanableByDrive.clear();
+    }
+    cleanWasRunning = cleaningNow;
+
     // Limpeza automática (AutoDelete) concluída: avisa por balão da bandeja,
     // já que o usuário pode nem estar com a janela aberta nesse fluxo.
     if (autoCleanNotifyArmed && !cleaning.load()) {
@@ -261,6 +413,10 @@ void UiState::Tick() {
     // Balão da bandeja sai daqui (UI thread), não da worker da varredura leve.
     if (lightScanFresh.exchange(false)) CheckLowDiskAlert();
     PumpNotifications();
+
+    // --ui-selftest: os dados são fictícios e nada pode tocar o disco real nem
+    // disparar varredura/limpeza por baixo do roteiro.
+    if (selfTest) return;
 
     // Varredura leve periódica em segundo plano — roda em worker thread
     // própria (nunca direto aqui em Tick(), que é a UI thread): apesar do

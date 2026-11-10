@@ -11,6 +11,25 @@ foi feito — decisões e causas raiz que valem para a próxima sessão vão par
 
 ## Registro de Atividades Recentes
 
+### [2026-11-10] CLAUDE.md revisado (/init) + perfis do Visual Studio
+**O que foi feito:** Cabeçalho padrão do /init; comandos reais desta máquina (`out\build\x64-*`, `ctest` pelo caminho do VS); pitfalls de UI ImGui movidos para `.claude/docs/ui-imgui.md` (primeiro doc por domínio); pitfalls novos de heredoc longo e quebra de linha mista; leitura obrigatória enxuta. Perfis em `.vs/launch.vs.json` (local, gitignored): simulação, teste automático da UI, balões.
+**Arquivos alterados:**
+- `CLAUDE.md` — itens acima
+- `.claude/docs/ui-imgui.md` *(novo)*
+- `.vs/launch.vs.json` *(novo, não versionado)*
+
+### [2026-11-10] Roscas coloridas (categoria e unidade), lista de resultados agrupada e --ui-selftest
+**O que foi feito:** Pedido do usuário: rosca particionada em cores + lista de arquivos menos confusa. Aba Resultados: rosca com uma fatia por categoria (`theme::CategoryColor`) + legenda clicável/tooltip; itens agrupados por pasta (`ItemGrouping`, lógica pura com teste), ordenação pelo cabeçalho, filtro de texto e tamanho mínimo, checkbox tri-estado por pasta, `ImGuiListClipper` (3000 itens abertos ~1,5 ms/frame Debug), rodapé fixo com aviso de selecionados fora do filtro. Painel: rosca de cada unidade em uso/limpável (dourado)/livre, zerando o limpável após limpeza real. `activeTab` era código morto: virou `requestedTab` (só varredura manual troca para Resultados). Usuário pediu verificação automática → modo `--ui-selftest` (PNG do back buffer + report.txt, 10 passos, todos PASS, conferidos visualmente). Revisão final A + B cega: 2 Atenção (seta de ordenação dessincronizada após nova varredura; limpável velho após limpeza) e sugestões corrigidas. Build 0 erros/0 avisos, ctest 5/5, smoke `--dry-run` ok. Pendente: confirmação visual do usuário na janela real e autorização de commit.
+**Arquivos alterados:**
+- `include/storagecleaner/ItemGrouping.h`, `src/ItemGrouping.cpp`, `tests/test_item_grouping.cpp` *(novos)*
+- `src/ui/SelfTest.h`, `src/ui/SelfTest.cpp` *(novos)* — modo `--ui-selftest`
+- `src/ui/ResultsPanel.cpp` — rosca/legenda, filtro, tabela agrupada, rodapé fixo
+- `src/ui/DashboardPanel.cpp` — rosca de unidade em 3 partes
+- `src/ui/Theme.h`/`.cpp` — `CategoryColor`, `DrawSegmentedDonut`
+- `src/ui/UiState.h`/`.cpp` — `BucketView`, `AdoptScanResult`, `OnResultChanged`, ações de grupo/ordenação, `requestedTab`, gate do self-test no `Tick`
+- `src/ui/App.cpp`/`.h`, `src/main.cpp` — self-test, abas por `requestedTab`
+- `CMakeLists.txt`, `tests/CMakeLists.txt`, `CLAUDE.md`, `README.md`
+
 ### [2026-10-09] Anel de progresso passa a avançar durante varredura e limpeza
 **O que foi feito:** O usuário notou que o anel ficava parado e só enchia no fim. Causa: nenhum scanner gravava `fractionComplete` intermediário (só 1.0 no fim); o Cleaner idem. Solução: etapas no `ProgressChannel` (`SetStage`, preservadas por `Update`, que os scanners chamam sem saber a etapa) + `OverallFraction` pura (teste novo `test_progress`); ScanEngine = uma etapa por categoria que vai rodar; fração interna no hash de duplicados (candidatos conhecidos) e na limpeza (`IFileOperationProgressSink::UpdateProgress` → canal; restore points i/n); % no centro do anel e "Etapa k de n". Canal zerado em `StartScan`/`StartClean` (evita flash de 100% da execução anterior). Build 0/0, ctest 4/4, varredura completa 90 s sem crash. Limitação honesta: dentro de categoria sem total conhecido o anel fica parado até ela terminar. Pendente: confirmação visual do usuário.
 **Arquivos alterados:**

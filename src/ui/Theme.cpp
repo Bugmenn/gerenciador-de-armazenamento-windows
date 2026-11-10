@@ -4,8 +4,11 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace storagecleaner::ui {
 
@@ -163,6 +166,87 @@ void DrawInlineCircularGauge(float radius, float thickness, float fraction,
                                             ImGui::GetColorU32(ImGuiCol_Text), centerText);
     }
     ImGui::Dummy(ImVec2(radius * 2.0f, radius * 2.0f));
+}
+
+int DrawSegmentedDonut(ImVec2 center, float radius, float thickness, const DonutSlice* slices,
+                       int count, ImU32 trackColor, ImDrawList* drawList) {
+    if (!drawList) drawList = ImGui::GetWindowDrawList();
+    drawList->AddCircle(center, radius, trackColor, 64, thickness);
+
+    double total = 0.0;
+    int nonZero = 0;
+    for (int i = 0; i < count; ++i) {
+        total += static_cast<double>(slices[i].value);
+        if (slices[i].value > 0) ++nonZero;
+    }
+    if (nonZero == 0) return -1;
+
+    const float gap = nonZero > 1 ? 0.035f : 0.0f;
+    const float minAngle = 0.08f;
+    std::vector<float> angles(count, 0.0f);
+    float stolen = 0.0f, bigTotal = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        if (slices[i].value == 0) continue;
+        angles[i] = static_cast<float>(slices[i].value / total) * kTau;
+        if (angles[i] < minAngle) {
+            stolen += minAngle - angles[i];
+            angles[i] = minAngle;
+        } else {
+            bigTotal += angles[i];
+        }
+    }
+    // O arco extra das fatias minúsculas sai proporcionalmente das maiores,
+    // para a soma continuar uma volta completa.
+    if (stolen > 0.0f && bigTotal > 0.0f)
+        for (int i = 0; i < count; ++i)
+            if (slices[i].value > 0 && angles[i] > minAngle) angles[i] -= stolen * angles[i] / bigTotal;
+
+    int hovered = -1;
+    if (ImGui::IsWindowHovered()) {
+        ImVec2 mouse = ImGui::GetIO().MousePos;
+        float dx = mouse.x - center.x, dy = mouse.y - center.y;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        if (dist >= radius - thickness * 0.5f - 4.0f && dist <= radius + thickness * 0.5f + 4.0f) {
+            float a = std::atan2(dy, dx) - kStartAngle;
+            while (a < 0.0f) a += kTau;
+            while (a >= kTau) a -= kTau;
+            float acc = 0.0f;
+            for (int i = 0; i < count; ++i) {
+                if (slices[i].value == 0) continue;
+                if (a < acc + angles[i]) {
+                    hovered = i;
+                    break;
+                }
+                acc += angles[i];
+            }
+        }
+    }
+
+    float start = kStartAngle;
+    for (int i = 0; i < count; ++i) {
+        if (slices[i].value == 0) continue;
+        float a0 = start + gap * 0.5f;
+        float a1 = start + angles[i] - gap * 0.5f;
+        start += angles[i];
+        if (a1 <= a0) a1 = a0 + 0.01f;
+        int segments = std::max(2, static_cast<int>((a1 - a0) / kTau * 96.0f));
+        drawList->PathArcTo(center, radius, a0, a1, segments);
+        drawList->PathStroke(slices[i].color, 0, i == hovered ? thickness * 1.4f : thickness);
+    }
+    return hovered;
+}
+
+int DrawInlineSegmentedDonut(float radius, float thickness, const DonutSlice* slices, int count,
+                             ImU32 trackColor, ImVec2* outCenter) {
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    // Meia espessura da fatia em destaque (1.4x) + 1 px: sem isso o anel
+    // sai cortado na borda da janela/child.
+    float pad = thickness * 0.7f + 1.0f;
+    ImVec2 center(cursor.x + radius + pad, cursor.y + radius + pad);
+    int hovered = DrawSegmentedDonut(center, radius, thickness, slices, count, trackColor);
+    if (outCenter) *outCenter = center;
+    ImGui::Dummy(ImVec2((radius + pad) * 2.0f, (radius + pad) * 2.0f));
+    return hovered;
 }
 
 void DrawProgressRing(const ProgressSnapshot& snapshot) {

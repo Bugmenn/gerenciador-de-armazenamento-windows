@@ -50,7 +50,7 @@ void DrawDashboardPanel(UiState& state) {
     if (!lightTotals.drives.empty()) {
         ImGui::Separator();
         ImGui::TextUnformatted("Unidades:");
-        const float gaugeRadius = 22.0f;
+        const float gaugeRadius = 24.0f;
         for (std::size_t i = 0; i < lightTotals.drives.size(); ++i) {
             const util::DriveSpace& drive = lightTotals.drives[i];
             std::uint64_t used = drive.totalBytes - std::min(drive.freeBytes, drive.totalBytes);
@@ -58,14 +58,26 @@ void DrawDashboardPanel(UiState& state) {
                                                     static_cast<double>(drive.totalBytes));
             bool low = state.config.lowDiskAlertEnabled && !drive.isRemovable &&
                        (1.0f - usedFraction) * 100.0f < static_cast<float>(state.config.lowDiskAlertPercent);
-            ImU32 fill = ImGui::ColorConvertFloat4ToU32(low ? theme::kDanger : theme::kAccentBlue);
-            ImU32 fillEnd = ImGui::ColorConvertFloat4ToU32(low ? theme::kDanger : theme::kAccentGold);
+            // Parte do "usado" que a última varredura achou nesta unidade.
+            std::uint64_t cleanable = 0;
+            if (state.hasScanResult && !drive.root.empty()) {
+                wchar_t letter = drive.root[0];
+                if (letter >= L'a' && letter <= L'z') letter = static_cast<wchar_t>(letter - L'a' + L'A');
+                auto it = state.cleanableByDrive.find(letter);
+                if (it != state.cleanableByDrive.end()) cleanable = std::min(it->second, used);
+            }
+            DonutSlice slices[] = {
+                {used - cleanable, ImGui::ColorConvertFloat4ToU32(low ? theme::kDanger : theme::kAccentBlue)},
+                {cleanable, ImGui::ColorConvertFloat4ToU32(theme::kAccentGold)},
+                {std::min(drive.freeBytes, drive.totalBytes), ImGui::ColorConvertFloat4ToU32(theme::kBorder)},
+            };
 
             ImGui::PushID(static_cast<int>(i));
             ImGui::BeginGroup();
-            DrawInlineCircularGauge(gaugeRadius, 5.0f, usedFraction, fill, fillEnd,
-                                    ImGui::ColorConvertFloat4ToU32(theme::kBorder));
+            int hovered = DrawInlineSegmentedDonut(gaugeRadius, 6.0f, slices, 3,
+                                                   ImGui::ColorConvertFloat4ToU32(theme::kBorder));
             ImGui::EndGroup();
+            bool gaugeHovered = ImGui::IsItemHovered();
             ImGui::SameLine();
             ImGui::BeginGroup();
             ImGui::Text("%s%s", util::WideToUtf8(drive.root).c_str(),
@@ -73,7 +85,24 @@ void DrawDashboardPanel(UiState& state) {
             ImGui::TextColored(low ? theme::kDanger : theme::kTextMuted, "%s livres de %s",
                                util::FormatSize(drive.freeBytes).c_str(),
                                util::FormatSize(drive.totalBytes).c_str());
+            if (cleanable > 0)
+                ImGui::TextColored(theme::kAccentGold, "%s podem ser liberados",
+                                   util::FormatSize(cleanable).c_str());
             ImGui::EndGroup();
+            if (hovered >= 0 || gaugeHovered || ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::TextColored(low ? theme::kDanger : theme::kAccentBlue, "Em uso: %s",
+                                   util::FormatSize(used - cleanable).c_str());
+                if (state.hasScanResult)
+                    ImGui::TextColored(theme::kAccentGold, "Encontrado para limpar: %s",
+                                       util::FormatSize(cleanable).c_str());
+                ImGui::TextColored(theme::kTextMuted, "Livre: %s", util::FormatSize(drive.freeBytes).c_str());
+                if (state.hasScanResult)
+                    ImGui::TextDisabled("Lixeira e pontos de restauração não entram na conta por unidade.");
+                else
+                    ImGui::TextDisabled("Escaneie para ver quanto dá para liberar nesta unidade.");
+                ImGui::EndTooltip();
+            }
             ImGui::PopID();
         }
     }

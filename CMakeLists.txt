@@ -48,6 +48,7 @@ add_executable(StorageCleaner WIN32
     src/HistoryStore.cpp
     src/DuplicateGrouping.cpp
     src/PathExclusion.cpp
+    src/ItemGrouping.cpp
     src/scanners/TempFilesScanner.cpp
     src/scanners/BrowserCacheScanner.cpp
     src/scanners/DuplicateScanner.cpp
@@ -72,6 +73,7 @@ add_executable(StorageCleaner WIN32
     src/ui/HistoryPanel.cpp
     src/ui/FileDialogs.cpp
     src/ui/Notifications.cpp
+    src/ui/SelfTest.cpp
     resources/app.rc
 )
 
@@ -108,6 +110,7 @@ target_link_libraries(StorageCleaner PRIVATE
     bcrypt
     crypt32
     shlwapi
+    windowscodecs
 )
 
 enable_testing()

@@ -4,12 +4,14 @@
 #include "storagecleaner/Cleaner.h"
 #include "storagecleaner/Config.h"
 #include "storagecleaner/HistoryEntry.h"
+#include "storagecleaner/ItemGrouping.h"
 #include "storagecleaner/ProgressState.h"
 #include "storagecleaner/ScanResult.h"
 #include "storagecleaner/Scanner.h"
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -18,6 +20,60 @@
 #include <vector>
 
 namespace storagecleaner::ui {
+
+// Opções do filtro "tamanho mínimo" da aba Resultados.
+struct MinSizeOption {
+    const char* label;
+    std::uint64_t bytes;
+};
+inline constexpr MinSizeOption kMinSizeOptions[] = {
+    {"Qualquer tamanho", 0},
+    {"A partir de 1 MB", 1ull << 20},
+    {"A partir de 10 MB", 10ull << 20},
+    {"A partir de 100 MB", 100ull << 20},
+};
+
+enum class TriState { None, Some, All };
+
+// Linha da tabela agrupada: cabeçalho de pasta (`item` == kGroupRow) ou item
+// (índice em bucket.items). Grupo de um item só vira linha de item direta.
+struct ResultRow {
+    static constexpr std::size_t kGroupRow = static_cast<std::size_t>(-1);
+    std::size_t group = 0;
+    std::size_t item = kGroupRow;
+};
+
+// Lista agrupada/filtrada/ordenada de uma categoria, já "achatada" em linhas
+// para o ImGuiListClipper. Reconstruída só quando a chave (versão do
+// resultado, filtro, ordenação) muda — nunca a cada frame.
+struct BucketView {
+    std::vector<ItemGroup> groups;
+    std::vector<ResultRow> rows;
+    std::size_t visibleItems = 0;
+    // Pastas cujo estado aberto/fechado o usuário inverteu em relação ao
+    // padrão (fechado; aberto quando há texto no filtro).
+    std::set<std::wstring> toggledFolders;
+    ItemSortKey sortKey = ItemSortKey::Size;
+    bool sortDescending = true;
+    // A ordenação mudou fora do cabeçalho da tabela (self-test): o painel
+    // reflete a seta no cabeçalho no próximo frame.
+    bool sortChangedExternally = false;
+
+    std::uint64_t builtVersion = static_cast<std::uint64_t>(-1);
+    std::wstring builtNeedle;
+    std::uint64_t builtMinBytes = 0;
+    ItemSortKey builtSortKey = ItemSortKey::Size;
+    bool builtSortDescending = true;
+    bool rowsDirty = true;
+};
+
+// Geometria publicada pelo painel só no --ui-selftest, para o roteiro saber
+// onde injetar o mouse (hover numa fatia da rosca).
+struct SelfTestProbe {
+    ImVec2 donutCenter{};
+    float donutRadius = 0.0f;
+    int donutHovered = -1;
+};
 
 // Todo o estado que a janela ImGui lê/escreve a cada frame. Fica de propósito
 // fora dos structs "puros" em include/storagecleaner — scanner e cleaner não
@@ -39,6 +95,22 @@ struct UiState {
     // Um vetor de seleção paralelo a cada bucket de lastScanResult.
     std::vector<std::vector<bool>> selection;
     bool hasScanResult = false;
+
+    // Aba Resultados: lista agrupada por pasta. `resultVersion` muda sempre
+    // que lastScanResult muda (OnResultChanged), invalidando bucketViews.
+    std::uint64_t resultVersion = 0;
+    std::vector<BucketView> bucketViews;
+    char resultsFilter[256] = {};
+    int resultsMinSizeIdx = 0;
+    // Categoria a abrir e rolar até ela no próximo frame (clique na rosca/legenda).
+    std::optional<std::size_t> pendingOpenBucket;
+    // Bytes da última varredura por letra de unidade (rosca das unidades).
+    // Zerado quando uma limpeza real termina (ver Tick).
+    std::map<wchar_t, std::uint64_t> cleanableByDrive;
+    bool cleanWasRunning = false;
+    // Cache de resultsFilter convertido para wide (CurrentItemFilter).
+    mutable std::string filterUtf8Cache;
+    mutable std::wstring filterWideCache;
 
     // Limpeza (compartilha o mesmo canal de progresso de "Cleaning").
     std::thread cleanThread;
@@ -85,6 +157,10 @@ struct UiState {
     // config.json existente estava ilegível (ver SettingsPanel).
     bool exclusionsSaveFailed = false;
     bool requestExit = false;
+    // --ui-selftest: dados fictícios, sem varredura leve, agendamento nem
+    // alerta de disco (ver SelfTest.cpp).
+    bool selfTest = false;
+    SelfTestProbe selfTestProbe;
     // Populado uma unica vez em RunApp() (App.cpp) via Theme::LoadFonts(),
     // depois de ImGui::CreateContext() — os paineis so leem, nunca escrevem.
     AppFonts fonts;
@@ -102,7 +178,9 @@ struct UiState {
     // Último disparo do agendador nesta execução do app (ver ShouldRunAutoClean).
     std::optional<std::chrono::system_clock::time_point> lastAutoCleanTrigger;
 
-    int activeTab = 0;
+    // Aba a selecionar no próximo frame (-1 = deixa a do usuário); App.cpp
+    // aplica com ImGuiTabItemFlags_SetSelected e volta para -1.
+    int requestedTab = -1;
     // Definido uma vez em RunApp() a partir de --dry-run; repassado a
     // CleanItems() em toda limpeza (manual ou automática).
     bool dryRun = false;
@@ -119,6 +197,27 @@ struct UiState {
     // varredura, para a revisão e o modal de confirmação não mostrarem itens
     // que a limpeza vai descartar.
     void ApplyExclusionsToLastResult();
+    // Adota um resultado de varredura: seleção inicial (tudo marcado, menos
+    // as categorias heurísticas), listas recomeçadas e aba Resultados.
+    void AdoptScanResult(ScanResult result);
+    // Chamar sempre que lastScanResult/selection forem substituídos ou
+    // alterados: invalida as listas agrupadas e recalcula cleanableByDrive.
+    void OnResultChanged();
+
+    // Lista agrupada da categoria `bucketIdx`, reconstruída se preciso.
+    BucketView& GetBucketView(std::size_t bucketIdx);
+    ItemFilter CurrentItemFilter() const;
+    bool IsFilterActive() const;
+    bool IsGroupOpen(const BucketView& view, std::size_t groupIdx) const;
+    // As ações abaixo são chamadas pelo ResultsPanel e pelo self-test — o
+    // self-test exercita o mesmo caminho do clique.
+    void ToggleGroup(std::size_t bucketIdx, std::size_t groupIdx);
+    void SetGroupSelected(std::size_t bucketIdx, std::size_t groupIdx, bool selected);
+    void SetVisibleSelected(std::size_t bucketIdx, bool selected);
+    TriState GroupSelectionState(std::size_t bucketIdx, std::size_t groupIdx);
+    TriState VisibleSelectionState(std::size_t bucketIdx);
+    void SetResultsSort(std::size_t bucketIdx, ItemSortKey key, bool descending, bool fromHeader);
+    void RequestOpenCategory(std::size_t bucketIdx) { pendingOpenBucket = bucketIdx; }
 
     std::vector<ScanItem> CollectSelectedItems() const;
 

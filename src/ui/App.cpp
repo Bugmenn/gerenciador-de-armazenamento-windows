@@ -1,5 +1,6 @@
 #include "App.h"
 #include "Panels.h"
+#include "SelfTest.h"
 #include "Theme.h"
 #include "TrayIcon.h"
 #include "UiState.h"
@@ -115,7 +116,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Desligar/logoff encerra o processo sem passar pelo fim de
             // RunApp — e, com o app na bandeja, esse é o jeito mais comum
             // de ele terminar.
-            if (wParam) SaveWindowPlacementToDisk(hwnd);
+            // O self-test nunca grava config.json, nem num logoff no meio dele.
+            if (wParam && !(g_uiState && g_uiState->selfTest)) SaveWindowPlacementToDisk(hwnd);
             return 0;
 
         case WM_SIZE:
@@ -225,11 +227,15 @@ void SaveWindowPlacementToDisk(HWND hwnd) {
 
 } // namespace
 
-int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
+int RunApp(bool startMinimized, bool dryRun, bool testBalloons, const std::wstring& selfTestDir) {
+    const bool selfTestMode = !selfTestDir.empty();
     UiState state;
-    state.config = LoadConfig();
-    state.dryRun = dryRun;
+    // O self-test não lê nem grava config.json: roda com a config padrão,
+    // isolado do que o usuário configurou.
+    state.config = selfTestMode ? Config{} : LoadConfig();
+    state.dryRun = dryRun || selfTestMode;
     state.testBalloons = testBalloons;
+    state.selfTest = selfTestMode;
     g_uiState = &state;
 
     HINSTANCE hInstance = ::GetModuleHandleW(nullptr);
@@ -248,8 +254,16 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
                   hInstance, appIcon,   nullptr, nullptr, nullptr,
                   L"StorageCleanerWindowClass", appIconSmall};
     ::RegisterClassExW(&wc);
+    // Self-test: área cliente fixa de 1280x800, para os PNGs saírem sempre
+    // do mesmo tamanho.
+    RECT windowRect{0, 0, 1024, 720};
+    if (selfTestMode) {
+        windowRect = RECT{0, 0, 1280, 800};
+        ::AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+    }
     HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Otimizador de Armazenamento",
-                               WS_OVERLAPPEDWINDOW, 100, 100, 1024, 720, nullptr, nullptr,
+                               WS_OVERLAPPEDWINDOW, 100, 100, windowRect.right - windowRect.left,
+                               windowRect.bottom - windowRect.top, nullptr, nullptr,
                                wc.hInstance, nullptr);
 
     if (!CreateDeviceD3D(hwnd)) {
@@ -258,7 +272,9 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
         return 1;
     }
 
-    if (!RestoreWindowPlacement(hwnd, state.config.window, startMinimized))
+    // Self-test: a janela nunca aparece (nem rouba o foco); renderiza no
+    // back buffer escondida mesmo.
+    if (!selfTestMode && !RestoreWindowPlacement(hwnd, state.config.window, startMinimized))
         ::ShowWindow(hwnd, startMinimized ? SW_HIDE : SW_SHOWDEFAULT);
     // Com --startup a janela nasce escondida; SetWindowPlacement com SW_HIDE
     // não guarda "maximizada", então o primeiro "Abrir" da bandeja aplica.
@@ -267,7 +283,7 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
     ::UpdateWindow(hwnd);
     state.windowVisible = !startMinimized;
 
-    CreateTrayIcon(hwnd);
+    if (!selfTestMode) CreateTrayIcon(hwnd);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -285,6 +301,13 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+
+    std::optional<SelfTest> selfTest;
+    int exitCode = 0;
+    if (selfTestMode) {
+        selfTest.emplace(state, selfTestDir);
+        selfTest->LoadFixture();
+    }
 
     bool done = false;
     while (!done) {
@@ -307,7 +330,8 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
             continue;
         }
 
-        if (g_swapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
+        if (!selfTestMode && g_swapChainOccluded &&
+            g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
             ::Sleep(10);
             continue;
         }
@@ -315,6 +339,7 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
+        if (selfTest) selfTest->BeforeNewFrame();
         ImGui::NewFrame();
 
         ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -337,19 +362,24 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
         ImGui::Separator();
 
         if (ImGui::BeginTabBar("MainTabs")) {
-            if (ImGui::BeginTabItem("Painel")) {
+            const int requested = state.requestedTab;
+            state.requestedTab = -1;
+            auto flagsFor = [&](int tab) {
+                return requested == tab ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+            };
+            if (ImGui::BeginTabItem("Painel", nullptr, flagsFor(0))) {
                 DrawDashboardPanel(state);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Resultados")) {
+            if (ImGui::BeginTabItem("Resultados", nullptr, flagsFor(1))) {
                 DrawResultsPanel(state);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Configurações")) {
+            if (ImGui::BeginTabItem("Configurações", nullptr, flagsFor(2))) {
                 DrawSettingsPanel(state);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Histórico")) {
+            if (ImGui::BeginTabItem("Histórico", nullptr, flagsFor(3))) {
                 DrawHistoryPanel(state);
                 ImGui::EndTabItem();
             }
@@ -363,7 +393,12 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clearColor);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-        HRESULT hr = g_pSwapChain->Present(1, 0);
+        if (selfTest && selfTest->AfterRender(g_pSwapChain, g_pd3dDevice, g_pd3dDeviceContext)) {
+            exitCode = selfTest->Failures();
+            break;
+        }
+
+        HRESULT hr = g_pSwapChain->Present(selfTestMode ? 0 : 1, 0);
         g_swapChainOccluded = (hr == DXGI_STATUS_OCCLUDED);
     }
 
@@ -371,14 +406,15 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons) {
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
 
-    SaveWindowPlacementToDisk(hwnd);
-
-    RemoveTrayIcon();
+    if (!selfTestMode) {
+        SaveWindowPlacementToDisk(hwnd);
+        RemoveTrayIcon();
+    }
     CleanupDeviceD3D();
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
     g_uiState = nullptr;
-    return 0;
+    return exitCode;
 }
 
 } // namespace storagecleaner::ui
