@@ -15,9 +15,16 @@ namespace {
 void ScanDirForOldLogs(const fs::path& dir, const Config& config, ProgressChannel& progress,
                        std::atomic<bool>& cancel, std::vector<ScanItem>& out,
                        ProgressSnapshot& snapshot) {
-    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const std::wstring& path,
-                                                          std::uint64_t size) {
+    const std::int64_t now = util::NowFileTimeTicks();
+    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const util::FileEntry& entry) {
+        const std::wstring& path = entry.path;
+        const std::uint64_t size = entry.sizeBytes;
         if (fs::path(path).extension() != L".log") return;
+        // Data da listagem como filtro barato, reconfirmada no arquivo: um log
+        // mantido aberto por um serviço tem a data da listagem atrasada e
+        // pareceria antigo.
+        if (util::AgeHoursAt(entry.lastWriteTicks, now) < static_cast<std::int64_t>(config.oldLogsThresholdDays) * 24)
+            return;
         if (!util::IsOlderThanDays(path, config.oldLogsThresholdDays)) return;
 
         out.push_back(ScanItem{path, size, Category::OldLogs, L"", false});

@@ -49,6 +49,14 @@ automática só leva as de chance Baixa**. Tudo vai para a Lixeira.
 
 ## Como funciona
 
+- **Varredura rápida**: a listagem de pastas já traz tamanho e data de cada
+  arquivo (sem consultar arquivo por arquivo); em SSD, até 4 categorias são
+  varridas ao mesmo tempo (em HD mecânico, uma por vez, porque leitura
+  simultânea deixaria o disco mais lento). Na busca por duplicados, só os
+  arquivos de mesmo tamanho são lidos, primeiro só o começo e o fim de cada
+  um, e o conteúdo inteiro apenas quando essas partes coincidem; arquivos do
+  OneDrive que estão só na nuvem não são lidos (não são baixados).
+
 - **Revisão antes de excluir**: toda varredura mostra os itens encontrados,
   agrupados por categoria, com checkboxes — nada é apagado sem confirmação,
   a menos que a limpeza automática esteja configurada no modo "Excluir

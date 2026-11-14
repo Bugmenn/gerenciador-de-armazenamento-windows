@@ -46,10 +46,15 @@ struct LightScanTotals {
 // editando ao mesmo tempo nas Configurações (ver UiState::Tick).
 LightScanTotals RunLightBackgroundScan();
 
+// --scan-benchmark: varredura completa com Config::Defaults() (só leitura,
+// nada é excluído nem gravado em config/histórico), relatório de tempo por
+// categoria em `reportPath`. Devolve 0 se conseguiu gravar o relatório.
+int RunScanBenchmark(const std::wstring& reportPath);
+
 class ScanEngine {
 public:
-    // Roda todos os scanners habilitados sequencialmente numa worker thread;
-    // não bloqueia a chamadora. Uma nova chamada só deve ser feita depois que
+    // Roda todos os scanners habilitados numa worker thread (várias categorias
+    // ao mesmo tempo em SSD, uma por vez em HD); não bloqueia a chamadora. Uma nova chamada só deve ser feita depois que
     // IsRunning() voltar a false.
     void RunAsync(const Config& config, ProgressChannel& progress);
     void RequestCancel();

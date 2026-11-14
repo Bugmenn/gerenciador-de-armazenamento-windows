@@ -1,3 +1,4 @@
+#include "storagecleaner/Scanner.h"
 #include "ui/App.h"
 
 #include <windows.h>
@@ -11,13 +12,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR cmdLine, int) {
     // lê nem grava config.json/history.json nem exclui nada, então dispensa o
     // mutex de instância única — roda mesmo com o app do usuário aberto.
     std::wstring selfTestDir;
+    std::wstring benchmarkReport;
     {
         int argc = 0;
         LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
-        for (int i = 1; argv && i + 1 < argc; ++i)
+        for (int i = 1; argv && i + 1 < argc; ++i) {
             if (std::wstring(argv[i]) == L"--ui-selftest") selfTestDir = argv[i + 1];
+            if (std::wstring(argv[i]) == L"--scan-benchmark") benchmarkReport = argv[i + 1];
+        }
         if (argv) ::LocalFree(argv);
     }
+    // --scan-benchmark <arquivo>: só varre (leitura) e grava os tempos; não
+    // abre janela nem toca config/histórico, então também dispensa o mutex.
+    if (!benchmarkReport.empty()) return storagecleaner::RunScanBenchmark(benchmarkReport);
     if (!selfTestDir.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(selfTestDir, ec);

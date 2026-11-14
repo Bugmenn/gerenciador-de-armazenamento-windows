@@ -17,8 +17,11 @@ std::vector<ScanItem> GroupDuplicatesByHash(std::vector<HashedFile> files) {
     for (auto& [hash, group] : byHash) {
         if (group.size() < 2) continue;
 
+        // Cópias costumam ter a mesma data: sem o desempate pelo caminho, qual
+        // fica dependeria da ordem em que a listagem de pastas as achou.
         std::sort(group.begin(), group.end(), [](const HashedFile& a, const HashedFile& b) {
-            return a.lastWriteTicks < b.lastWriteTicks;
+            if (a.lastWriteTicks != b.lastWriteTicks) return a.lastWriteTicks < b.lastWriteTicks;
+            return a.path < b.path;
         });
 
         const std::wstring keepPath = group.front().path;

@@ -6,7 +6,10 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <chrono>
 #include <iterator>
+#include <thread>
 
 namespace storagecleaner {
 
@@ -54,6 +57,15 @@ void AddBucket(ScanResult& result, Category category, std::vector<ScanItem>&& it
     result.buckets.push_back(std::move(bucket));
 }
 
+// Quantas categorias varrer ao mesmo tempo: 4 (ou menos núcleos) se o disco
+// do Windows for SSD, 1 se for HD ou não der para saber.
+std::size_t ScanParallelism() {
+    wchar_t windowsDir[MAX_PATH];
+    UINT len = ::GetWindowsDirectoryW(windowsDir, MAX_PATH);
+    if (len < 2 || windowsDir[1] != L':') return 1;
+    return static_cast<std::size_t>(util::ReadParallelism(windowsDir[0]));
+}
+
 } // namespace
 
 void RemoveProtectedItems(std::vector<ScanItem>& items, const std::vector<std::wstring>& excludedPaths) {
@@ -90,32 +102,85 @@ void ScanEngine::RunAsync(const Config& config, ProgressChannel& progress) {
         auto willRun = [&](Category c) {
             return enabled(c) && !(IsAdminRequiredCategory(c) && !elevated);
         };
-        // Cada categoria é uma etapa do anel de progresso: a maioria dos
-        // scanners não sabe o próprio total, então "categoria k de n" é o
-        // progresso geral honesto que dá para mostrar.
-        int stageCount = 0;
-        for (const ScannerEntry& scanner : kScanners)
-            if (willRun(scanner.category)) ++stageCount;
-        int stageIndex = 0;
-        progress.SetStage(0, stageCount);
-
+        std::vector<const ScannerEntry*> toRun;
         for (const ScannerEntry& scanner : kScanners) {
-            if (cancelRequested_.load()) break;
             if (!enabled(scanner.category)) continue;
             if (!willRun(scanner.category)) {
                 result.skippedNeedAdmin.push_back(scanner.category);
                 continue;
             }
-            progress.SetStage(stageIndex++, stageCount);
             if (IsPartiallyAdminCategory(scanner.category) && !elevated)
                 result.partialNeedAdmin.push_back(scanner.category);
-            AddBucket(result, scanner.category, scanner.scan(config, progress, cancelRequested_),
-                      config.excludedPaths);
+            toRun.push_back(&scanner);
+        }
+
+        // Categorias rodam em paralelo (até 4) quando o disco do sistema é
+        // SSD; em HD — ou sem saber — uma por vez, como antes: leitura
+        // concorrente faz a cabeça do disco pular e fica mais lenta. Cada
+        // categoria publica no próprio canal e esta thread combina tudo no
+        // canal da UI (CombineParallelProgress); os scanners não mudam.
+        const std::size_t total = toRun.size();
+        const int parallel = static_cast<int>(std::min<std::size_t>(ScanParallelism(), total == 0 ? 1 : total));
+        std::vector<ProgressChannel> channels(total);
+        std::vector<std::vector<ScanItem>> outputs(total);
+        std::vector<double> millis(total, 0.0);
+        std::vector<std::atomic<bool>> finished(total);
+        std::atomic<std::size_t> next{0};
+        progress.SetStage(0, static_cast<int>(total));
+
+        std::vector<std::thread> workers;
+        for (int w = 0; w < parallel; ++w) {
+            workers.emplace_back([&] {
+                for (std::size_t i = next++; i < total && !cancelRequested_.load(); i = next++) {
+                    auto started = std::chrono::steady_clock::now();
+                    outputs[i] = toRun[i]->scan(config, channels[i], cancelRequested_);
+                    millis[i] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+                                    .count();
+                    finished[i].store(true);
+                }
+            });
+        }
+        auto publish = [&] {
+            std::vector<ProgressSnapshot> parts;
+            std::vector<bool> done;
+            parts.reserve(total);
+            for (std::size_t i = 0; i < total; ++i) {
+                parts.push_back(channels[i].Read());
+                done.push_back(finished[i].load());
+            }
+            progress.Update(CombineParallelProgress(parts, done));
+        };
+        // Publica já: o canal da UI ainda tem o snapshot final da varredura
+        // anterior (100%, "Concluído") até o primeiro ciclo abaixo.
+        publish();
+        for (std::size_t doneCount = 0; doneCount < total;) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            publish();
+            doneCount = 0;
+            for (std::size_t i = 0; i < total; ++i) doneCount += finished[i].load() ? 1 : 0;
+            // Cancelado: os workers param de pegar categorias novas; as que
+            // não começaram nunca ficam "finished".
+            if (cancelRequested_.load()) break;
+        }
+        for (auto& worker : workers) worker.join();
+
+        // Na ordem de kScanners, depois de todos terminarem: a UI recebe os
+        // buckets sempre na mesma ordem, e o filtro de pastas protegidas
+        // (AddBucket) continua sendo o ponto único antes da UI.
+        for (std::size_t i = 0; i < total; ++i) {
+            if (!finished[i].load()) continue;
+            result.categoryMillis.emplace_back(toRun[i]->category, millis[i]);
+            AddBucket(result, toRun[i]->category, std::move(outputs[i]), config.excludedPaths);
         }
 
         ProgressSnapshot finalSnapshot;
         finalSnapshot.phase = cancelRequested_.load() ? Phase::Cancelled : Phase::Done;
         finalSnapshot.fractionComplete = 1.0f;
+        finalSnapshot.overallFraction = 1.0f;
+        int finishedCount = 0;
+        for (std::size_t i = 0; i < total; ++i) finishedCount += finished[i].load() ? 1 : 0;
+        // Cancelada: mostra quantas categorias de fato terminaram.
+        finalSnapshot.stagesDone = finishedCount;
         progress.Update(finalSnapshot);
 
         {

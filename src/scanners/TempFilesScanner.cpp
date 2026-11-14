@@ -17,13 +17,18 @@ namespace {
 void ScanDirForTempFiles(const fs::path& dir, const Config& config,
                          ProgressChannel& progress, std::atomic<bool>& cancel,
                          std::vector<ScanItem>& out, ProgressSnapshot& snapshot) {
-    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const std::wstring& path,
-                                                          std::uint64_t size) {
+    const std::int64_t now = util::NowFileTimeTicks();
+    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const util::FileEntry& entry) {
+        const std::wstring& path = entry.path;
+        const std::uint64_t size = entry.sizeBytes;
         if (size < config.minFileSizeBytes) return;
         // Sem esse filtro de idade, um temporário criado há segundos por um
         // processo em execução (instalador extraindo, download em andamento,
         // autosave) poderia ser marcado para exclusão só por já ultrapassar o
-        // tamanho mínimo.
+        // tamanho mínimo. A data da listagem é o filtro barato; quem passa é
+        // reconfirmado no próprio arquivo, porque a listagem da pasta pode
+        // trazer data atrasada de um arquivo ainda aberto.
+        if (util::AgeHoursAt(entry.lastWriteTicks, now) < config.tempFilesMinAgeHours) return;
         if (!util::IsOlderThanHours(path, config.tempFilesMinAgeHours)) return;
 
         out.push_back(ScanItem{path, size, Category::TempFiles, L"", false});

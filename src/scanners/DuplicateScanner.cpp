@@ -5,14 +5,21 @@
 #include <windows.h>
 #include <shlobj.h>
 
-#include <filesystem>
+#include <algorithm>
+#include <chrono>
+#include <functional>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
-
-namespace fs = std::filesystem;
 
 namespace storagecleaner {
 
 namespace {
+
+// Bytes lidos de cada ponta no hash parcial: o suficiente para separar quase
+// todos os arquivos diferentes de mesmo tamanho (cabeçalho + final) lendo só
+// 128 KB em vez do arquivo inteiro.
+constexpr std::uint32_t kEdgeBytes = 64 * 1024;
 
 std::vector<std::wstring> DefaultDuplicateRoots() {
     std::vector<std::wstring> roots;
@@ -22,6 +29,49 @@ std::vector<std::wstring> DefaultDuplicateRoots() {
         if (!path.empty()) roots.push_back(path);
     }
     return roots;
+}
+
+struct Candidate {
+    std::wstring path;
+    std::uint64_t sizeBytes = 0;
+    std::int64_t lastWriteTicks = 0;
+    std::string edgeHash;
+    std::string fullHash;
+};
+
+// Leitura concorrente só ajuda em SSD; em HD (ou sem saber) a cabeça do disco
+// pularia entre arquivos e ficaria mais lento que um por vez.
+int HashThreadCount(const std::vector<std::wstring>& roots) {
+    int threads = 4;
+    for (const auto& root : roots) {
+        if (root.size() < 2 || root[1] != L':') return 1;
+        threads = std::min(threads, util::ReadParallelism(root[0]));
+    }
+    return roots.empty() ? 1 : threads;
+}
+
+// Roda `work` para cada job em `threads` workers (um FileHasher por worker,
+// que não é thread-safe) e chama `onTick` a cada ~100 ms na thread chamadora
+// — só ela publica progresso.
+void HashInParallel(std::vector<Candidate*>& jobs, int threads, std::atomic<bool>& cancel,
+                    const std::function<void(util::FileHasher&, Candidate&)>& work,
+                    const std::function<void()>& onTick) {
+    if (jobs.empty()) return;
+    std::atomic<std::size_t> next{0};
+    std::atomic<int> running{threads};
+    std::vector<std::thread> workers;
+    for (int t = 0; t < threads; ++t) {
+        workers.emplace_back([&] {
+            util::FileHasher hasher;
+            for (std::size_t i = next++; i < jobs.size() && !cancel.load(); i = next++) work(hasher, *jobs[i]);
+            --running;
+        });
+    }
+    while (running.load() > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        onTick();
+    }
+    for (auto& worker : workers) worker.join();
 }
 
 } // namespace
@@ -38,58 +88,99 @@ std::vector<ScanItem> ScanDuplicates(const Config& config, ProgressChannel& prog
 
     // Passo 1: agrupa por tamanho exato. Arquivos de tamanhos diferentes
     // nunca são duplicados, então isso descarta a maioria dos arquivos sem
-    // precisar ler o conteúdo de nenhum deles. Guarda o caminho como wstring
-    // (não fs::path) para não pagar a conversão extra toda vez que for lido
-    // depois no passo 2.
-    std::unordered_map<std::uint64_t, std::vector<std::wstring>> bySize;
+    // precisar ler o conteúdo de nenhum deles. A data vem da própria listagem.
+    std::unordered_map<std::uint64_t, std::vector<Candidate>> bySize;
     for (const auto& root : roots) {
         if (cancel.load()) break;
-        util::ForEachFileRecursive(root, cancel, [&](const std::wstring& path, std::uint64_t size) {
-            if (size < config.minFileSizeBytes) return;
-            bySize[size].push_back(path);
+        util::ForEachFileRecursive(root, cancel, [&](const util::FileEntry& entry) {
+            if (entry.sizeBytes < config.minFileSizeBytes) return;
+            // Arquivo só na nuvem (OneDrive "sob demanda"): ler para hashear
+            // baixaria o arquivo inteiro da internet.
+            if (entry.attributes & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN |
+                                    FILE_ATTRIBUTE_OFFLINE))
+                return;
+            bySize[entry.sizeBytes].push_back(Candidate{entry.path, entry.sizeBytes, entry.lastWriteTicks, {}, {}});
         });
     }
 
-    // Passo 2: só faz hash dentro de cada grupo de mesmo tamanho — o custo de
-    // I/O de hashear o disco inteiro seria proibitivo, mas hashear apenas os
-    // candidatos plausíveis (mesmo tamanho) é viável. O agrupamento por hash
-    // em si (GroupDuplicatesByHash) é uma função pura, coberta por
-    // tests/test_duplicate_grouping.cpp sem depender de I/O real.
-    // Total conhecido só aqui (candidatos = arquivos com tamanho repetido):
-    // é o que permite o anel de progresso andar durante a etapa mais lenta.
-    std::uint64_t candidates = 0;
-    for (const auto& [size, paths] : bySize)
-        if (paths.size() >= 2) candidates += paths.size();
-
-    for (auto& [size, paths] : bySize) {
-        if (cancel.load()) break;
-        if (paths.size() < 2) continue; // tamanho único: não pode ter duplicata
-
-        std::vector<HashedFile> hashed;
-        for (const auto& path : paths) {
-            if (cancel.load()) break;
-
-            HashedFile file;
-            file.path = path;
-            file.sizeBytes = size;
-            file.sha256Hex = util::HashFileSHA256(file.path);
-
-            std::error_code timeEc;
-            auto writeTime = fs::last_write_time(path, timeEc);
-            file.lastWriteTicks = timeEc ? 0 : writeTime.time_since_epoch().count();
-
-            hashed.push_back(std::move(file));
-
-            snapshot.itemsProcessed++;
-            snapshot.currentItem = path;
-            snapshot.fractionComplete =
-                static_cast<float>(static_cast<double>(snapshot.itemsProcessed) / static_cast<double>(candidates));
-            if (snapshot.itemsProcessed % 16 == 0) progress.Update(snapshot);
+    const int threads = HashThreadCount(roots);
+    std::mutex currentMutex;
+    std::wstring current;
+    std::atomic<std::uint64_t> done{0};
+    std::uint64_t phaseBase = 0, phaseTotal = 0;
+    float phaseOffset = 0.0f;
+    // Metade do anel para o hash das pontas, metade para os completos (cujo
+    // total só se conhece depois das pontas).
+    auto publish = [&] {
+        std::uint64_t d = done.load();
+        snapshot.itemsProcessed = phaseBase + d;
+        {
+            std::lock_guard<std::mutex> lock(currentMutex);
+            snapshot.currentItem = current;
         }
+        float within = phaseTotal ? static_cast<float>(static_cast<double>(d) / static_cast<double>(phaseTotal)) : 1.0f;
+        snapshot.fractionComplete = phaseOffset + 0.5f * within;
+        progress.Update(snapshot);
+    };
+    auto track = [&](const Candidate& c) {
+        ++done;
+        std::lock_guard<std::mutex> lock(currentMutex);
+        current = c.path;
+    };
 
-        for (auto& item : GroupDuplicatesByHash(std::move(hashed))) {
-            snapshot.bytesFoundSoFar += item.sizeBytes;
-            items.push_back(std::move(item));
+    // Passo 2: hash das pontas (primeiros e últimos 64 KB) de todo arquivo de
+    // tamanho repetido — separa quase todos os diferentes sem ler o resto.
+    std::vector<Candidate*> edgeJobs;
+    for (auto& [size, group] : bySize)
+        if (group.size() >= 2)
+            for (auto& c : group) edgeJobs.push_back(&c);
+    phaseTotal = edgeJobs.size();
+    HashInParallel(
+        edgeJobs, threads, cancel,
+        [&](util::FileHasher& hasher, Candidate& c) {
+            c.edgeHash = hasher.Edges(c.path, c.sizeBytes, kEdgeBytes);
+            // Arquivo de até 2 pontas já foi lido inteiro: o hash das pontas
+            // é o SHA-256 completo dele.
+            if (c.sizeBytes <= 2ull * kEdgeBytes) c.fullHash = c.edgeHash;
+            track(c);
+        },
+        publish);
+
+    // Passo 3: SHA-256 completo só de quem empatou nas pontas com outro
+    // arquivo de mesmo tamanho. É ele que decide "é duplicado".
+    std::vector<Candidate*> fullJobs;
+    for (auto& [size, group] : bySize) {
+        if (group.size() < 2) continue;
+        std::unordered_map<std::string, int> edgeCount;
+        for (const auto& c : group)
+            if (!c.edgeHash.empty()) ++edgeCount[c.edgeHash];
+        for (auto& c : group)
+            if (!c.edgeHash.empty() && c.fullHash.empty() && edgeCount[c.edgeHash] >= 2) fullJobs.push_back(&c);
+    }
+    phaseBase = phaseTotal;
+    phaseTotal = fullJobs.size();
+    phaseOffset = 0.5f;
+    done = 0;
+    HashInParallel(
+        fullJobs, threads, cancel,
+        [&](util::FileHasher& hasher, Candidate& c) {
+            c.fullHash = hasher.Full(c.path);
+            track(c);
+        },
+        publish);
+
+    if (!cancel.load()) {
+        // O agrupamento final é o mesmo de antes (função pura, testada em
+        // tests/test_duplicate_grouping.cpp), só que com menos arquivos lidos.
+        for (auto& [size, group] : bySize) {
+            if (group.size() < 2) continue;
+            std::vector<HashedFile> hashed;
+            for (auto& c : group)
+                if (!c.fullHash.empty()) hashed.push_back(HashedFile{std::move(c.path), size, std::move(c.fullHash), c.lastWriteTicks});
+            for (auto& item : GroupDuplicatesByHash(std::move(hashed))) {
+                snapshot.bytesFoundSoFar += item.sizeBytes;
+                items.push_back(std::move(item));
+            }
         }
     }
 

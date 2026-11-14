@@ -1,15 +1,16 @@
 #include "storagecleaner/Utils.h"
 
 #include <windows.h>
+#include <bcrypt.h>
 #include <shlobj.h>
-#include <wincrypt.h>
+#include <winioctl.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cwctype>
 #include <filesystem>
 #include <optional>
-#include <sstream>
 #include <thread>
 #include <vector>
 
@@ -51,57 +52,119 @@ std::wstring Utf8ToWide(const std::string& utf8) {
     return result;
 }
 
-std::string HashFileSHA256(const std::wstring& path) {
-    HANDLE hFile = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                                  OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE) return {};
+namespace {
 
-    HCRYPTPROV hProv = 0;
-    HCRYPTHASH hHash = 0;
-    std::string result;
+// Fecha o HANDLE ao sair do escopo (todos os retornos antecipados do hash).
+struct FileHandle {
+    HANDLE h = INVALID_HANDLE_VALUE;
+    ~FileHandle() {
+        if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+    }
+};
 
-    if (!::CryptAcquireContextW(&hProv, nullptr, nullptr, PROV_RSA_AES,
-                                 CRYPT_VERIFYCONTEXT)) {
-        ::CloseHandle(hFile);
+constexpr std::size_t kHashBufferSize = 1 << 20; // 1 MB por leitura
+
+} // namespace
+
+FileHasher::FileHasher() : buffer_(kHashBufferSize) {
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    if (!BCRYPT_SUCCESS(::BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr,
+                                                      BCRYPT_HASH_REUSABLE_FLAG)))
+        return;
+    algorithm_ = alg;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    if (BCRYPT_SUCCESS(::BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, BCRYPT_HASH_REUSABLE_FLAG)))
+        hash_ = hash;
+}
+
+FileHasher::~FileHasher() {
+    if (hash_) ::BCryptDestroyHash(static_cast<BCRYPT_HASH_HANDLE>(hash_));
+    if (algorithm_) ::BCryptCloseAlgorithmProvider(static_cast<BCRYPT_ALG_HANDLE>(algorithm_), 0);
+}
+
+std::string FileHasher::Finish() {
+    unsigned char digest[32];
+    // Com BCRYPT_HASH_REUSABLE_FLAG, FinishHash também zera o objeto para o
+    // próximo arquivo.
+    if (!BCRYPT_SUCCESS(::BCryptFinishHash(static_cast<BCRYPT_HASH_HANDLE>(hash_), digest, sizeof(digest), 0)))
+        return {};
+    static const char kHex[] = "0123456789abcdef";
+    std::string hex(64, '0');
+    for (int i = 0; i < 32; ++i) {
+        hex[i * 2] = kHex[digest[i] >> 4];
+        hex[i * 2 + 1] = kHex[digest[i] & 0xF];
+    }
+    return hex;
+}
+
+std::string FileHasher::Full(const std::wstring& path) {
+    if (!hash_) return {};
+    FileHandle file{::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                  FILE_FLAG_SEQUENTIAL_SCAN, nullptr)};
+    if (file.h == INVALID_HANDLE_VALUE) return {};
+    for (;;) {
+        DWORD bytesRead = 0;
+        // Falha de leitura no meio não pode virar o hash do pedaço lido.
+        if (!::ReadFile(file.h, buffer_.data(), static_cast<DWORD>(buffer_.size()), &bytesRead, nullptr) ||
+            (bytesRead > 0 &&
+             !BCRYPT_SUCCESS(::BCryptHashData(static_cast<BCRYPT_HASH_HANDLE>(hash_), buffer_.data(), bytesRead, 0)))) {
+            Finish(); // zera o objeto reutilizável
+            return {};
+        }
+        if (bytesRead == 0) break;
+    }
+    return Finish();
+}
+
+std::string FileHasher::Edges(const std::wstring& path, std::uint64_t sizeBytes, std::uint32_t edgeBytes) {
+    if (!hash_) return {};
+    if (sizeBytes <= 2ull * edgeBytes) return Full(path);
+    FileHandle file{::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr)};
+    if (file.h == INVALID_HANDLE_VALUE) return {};
+    auto readAt = [&](std::uint64_t offset) {
+        LARGE_INTEGER pos;
+        pos.QuadPart = static_cast<LONGLONG>(offset);
+        DWORD bytesRead = 0;
+        return ::SetFilePointerEx(file.h, pos, nullptr, FILE_BEGIN) &&
+               ::ReadFile(file.h, buffer_.data(), edgeBytes, &bytesRead, nullptr) && bytesRead == edgeBytes &&
+               BCRYPT_SUCCESS(::BCryptHashData(static_cast<BCRYPT_HASH_HANDLE>(hash_), buffer_.data(), bytesRead, 0));
+    };
+    if (!readAt(0) || !readAt(sizeBytes - edgeBytes)) {
+        Finish();
         return {};
     }
-    if (!::CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash)) {
-        ::CryptReleaseContext(hProv, 0);
-        ::CloseHandle(hFile);
-        return {};
-    }
+    return Finish();
+}
 
-    // Lido em blocos (em vez de carregar o arquivo inteiro) para não estourar
-    // memória ao gerar hash de arquivos grandes durante a busca por duplicados.
-    constexpr DWORD kBufSize = 1 << 16;
-    std::vector<BYTE> buffer(kBufSize);
-    DWORD bytesRead = 0;
-    bool ok = true;
-    while (::ReadFile(hFile, buffer.data(), kBufSize, &bytesRead, nullptr) && bytesRead > 0) {
-        if (!::CryptHashData(hHash, buffer.data(), bytesRead, 0)) {
-            ok = false;
-            break;
-        }
-    }
+std::optional<bool> IsSolidStateDrive(wchar_t driveLetter) {
+    wchar_t device[] = L"\\\\.\\X:";
+    device[4] = driveLetter;
+    // Acesso 0: só consulta propriedades do dispositivo, não exige Administrador.
+    FileHandle volume{::CreateFileW(device, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr)};
+    if (volume.h == INVALID_HANDLE_VALUE) return std::nullopt;
+    STORAGE_PROPERTY_QUERY query{};
+    query.PropertyId = StorageDeviceSeekPenaltyProperty;
+    query.QueryType = PropertyStandardQuery;
+    DEVICE_SEEK_PENALTY_DESCRIPTOR penalty{};
+    DWORD returned = 0;
+    if (!::DeviceIoControl(volume.h, IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), &penalty,
+                           sizeof(penalty), &returned, nullptr) ||
+        returned < sizeof(penalty))
+        return std::nullopt;
+    return !penalty.IncursSeekPenalty;
+}
 
-    if (ok) {
-        BYTE hashValue[32];
-        DWORD hashLen = sizeof(hashValue);
-        if (::CryptGetHashParam(hHash, HP_HASHVAL, hashValue, &hashLen, 0)) {
-            std::ostringstream oss;
-            for (DWORD i = 0; i < hashLen; ++i) {
-                char buf[3];
-                std::snprintf(buf, sizeof(buf), "%02x", hashValue[i]);
-                oss << buf;
-            }
-            result = oss.str();
-        }
-    }
+int ReadParallelism(wchar_t driveLetter) {
+    if (!IsSolidStateDrive(driveLetter).value_or(false)) return 1;
+    unsigned hw = std::thread::hardware_concurrency();
+    return static_cast<int>(std::clamp<unsigned>(hw, 1, 4));
+}
 
-    ::CryptDestroyHash(hHash);
-    ::CryptReleaseContext(hProv, 0);
-    ::CloseHandle(hFile);
-    return result;
+std::int64_t NowFileTimeTicks() {
+    FILETIME now;
+    ::GetSystemTimeAsFileTime(&now);
+    return static_cast<std::int64_t>((static_cast<std::uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime);
 }
 
 bool IsOlderThanHours(const std::wstring& path, int hours) {
@@ -120,52 +183,87 @@ bool IsOlderThanDays(const std::wstring& path, int days) {
 
 std::uint64_t DirectorySize(const std::wstring& dir, std::atomic<bool>& cancel) {
     std::uint64_t total = 0;
-    ForEachFileRecursive(dir, cancel,
-                        [&total](const std::wstring&, std::uint64_t size) { total += size; });
+    ForEachFileRecursive(dir, cancel, [&total](const FileEntry& entry) { total += entry.sizeBytes; });
     return total;
 }
 
-void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel,
-                          const FileVisitor& visitor) {
-    std::error_code ec;
-    fs::recursive_directory_iterator it(
-        dir, fs::directory_options::skip_permission_denied, ec);
-    fs::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
+namespace {
+
+bool EndsWithExe(const std::wstring& path) {
+    if (path.size() < 4) return false;
+    const wchar_t* tail = path.c_str() + path.size() - 4;
+    return tail[0] == L'.' && (tail[1] | 0x20) == L'e' && (tail[2] | 0x20) == L'x' && (tail[3] | 0x20) == L'e';
+}
+
+} // namespace
+
+void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel, const FileVisitor& visitor) {
+    std::vector<std::wstring> pending{dir};
+    FileEntry entry;
+    WIN32_FIND_DATAW data;
+    while (!pending.empty()) {
         if (cancel.load()) return;
+        std::wstring current = std::move(pending.back());
+        pending.pop_back();
+        while (current.size() > 1 && (current.back() == L'\\' || current.back() == L'/')) current.pop_back();
 
-        std::error_code fileEc;
-        if (!it->is_regular_file(fileEc) || fileEc) continue;
+        // Caminho longo: o prefixo \\?\ libera o limite de MAX_PATH na busca;
+        // os caminhos entregues ao visitante continuam na forma normal.
+        std::wstring pattern = current + L"\\*";
+        if (pattern.size() >= MAX_PATH && current.rfind(L"\\\\", 0) != 0) pattern = L"\\\\?\\" + pattern;
 
-        auto size = it->file_size(fileEc);
-        if (fileEc) continue;
-
-        visitor(it->path().wstring(), size);
+        HANDLE find = ::FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr,
+                                         FIND_FIRST_EX_LARGE_FETCH);
+        if (find == INVALID_HANDLE_VALUE) continue; // sem permissão, sumiu ou não é pasta
+        do {
+            if (cancel.load()) break;
+            const wchar_t* name = data.cFileName;
+            if (name[0] == L'.' && (name[1] == L'\0' || (name[1] == L'.' && name[2] == L'\0'))) continue;
+            std::wstring full = current + L'\\' + name;
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                // Só symlink e junction ficam de fora (laço, sair da árvore) —
+                // como o recursive_directory_iterator de antes. Outras pastas
+                // reparse point, como as do OneDrive, são pastas de verdade.
+                const bool link = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                                  (data.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT ||
+                                   data.dwReserved0 == IO_REPARSE_TAG_SYMLINK);
+                if (!link) pending.push_back(std::move(full));
+                continue;
+            }
+            entry.path = std::move(full);
+            entry.sizeBytes = (static_cast<std::uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+            entry.lastWriteTicks = static_cast<std::int64_t>(
+                (static_cast<std::uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) |
+                data.ftLastWriteTime.dwLowDateTime);
+            entry.attributes = data.dwFileAttributes;
+            visitor(entry);
+        } while (::FindNextFileW(find, &data));
+        ::FindClose(find);
     }
 }
 
-DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays,
-                                     std::atomic<bool>& cancel) {
+DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays, std::atomic<bool>& cancel,
+                                     bool readDatesFromFiles) {
     DirectoryStats stats;
-    const auto now = fs::file_time_type::clock::now();
-    auto threshold = now - std::chrono::hours(static_cast<long long>(thresholdDays) * 24);
-    std::optional<fs::file_time_type> newest;
+    const std::int64_t now = NowFileTimeTicks();
+    const std::int64_t threshold = now - static_cast<std::int64_t>(thresholdDays) * 24 * kTicksPerHour;
+    std::int64_t newest = 0;
 
-    ForEachFileRecursive(dir, cancel, [&](const std::wstring& path, std::uint64_t size) {
-        stats.totalBytes += size;
-        std::wstring ext = fs::path(path).extension().wstring();
-        for (auto& ch : ext) ch = static_cast<wchar_t>(std::towlower(ch));
-        if (ext == L".exe") ++stats.executableCount;
-
-        std::error_code timeEc;
-        auto writeTime = fs::last_write_time(path, timeEc);
-        if (timeEc) return;
-        if (writeTime >= threshold) stats.hasRecentActivity = true;
-        if (!newest || writeTime > *newest) newest = writeTime;
+    ForEachFileRecursive(dir, cancel, [&](const FileEntry& entry) {
+        stats.totalBytes += entry.sizeBytes;
+        if (EndsWithExe(entry.path)) ++stats.executableCount;
+        std::int64_t written = entry.lastWriteTicks;
+        if (readDatesFromFiles) {
+            // file_clock do MSVC = FILETIME (100 ns desde 1601), mesma escala
+            // de lastWriteTicks.
+            std::error_code ec;
+            auto real = fs::last_write_time(entry.path, ec);
+            if (!ec) written = real.time_since_epoch().count();
+        }
+        if (written >= threshold) stats.hasRecentActivity = true;
+        if (written > newest) newest = written;
     });
-    if (newest && *newest < now)
-        stats.daysSinceNewestWrite =
-            static_cast<int>(std::chrono::duration_cast<std::chrono::hours>(now - *newest).count() / 24);
+    if (newest > 0) stats.daysSinceNewestWrite = static_cast<int>(AgeHoursAt(newest, now) / 24);
     return stats;
 }
 

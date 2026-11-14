@@ -51,7 +51,7 @@ void TestDifferentHashesAreNotGrouped() {
 }
 
 void TestEmptyHashIsIgnored() {
-    // Hash vazio simula falha de leitura do arquivo (ver util::HashFileSHA256)
+    // Hash vazio simula falha de leitura do arquivo (ver util::FileHasher)
     // — esses arquivos nao devem aparecer em nenhum grupo.
     std::vector<HashedFile> input = {
         {L"C:\\unreadable.txt", 100, "", 10},
@@ -72,9 +72,21 @@ void TestThreeWayDuplicateKeepsOnlyOldest() {
     for (const auto& item : result) Check(item.keepPath == L"C:\\a.txt", "mantem sempre o mais antigo");
 }
 
+// Mesma data (cópia preserva o horário): a escolha não pode depender da ordem
+// de entrada, que muda com a ordem da listagem de pastas.
+void TestSameDateTieBreaksByPath() {
+    std::vector<HashedFile> forward = {{L"C:\\b.txt", 10, "h", 100}, {L"C:\\a.txt", 10, "h", 100}};
+    std::vector<HashedFile> backward = {{L"C:\\a.txt", 10, "h", 100}, {L"C:\\b.txt", 10, "h", 100}};
+    auto r1 = GroupDuplicatesByHash(forward);
+    auto r2 = GroupDuplicatesByHash(backward);
+    Check(r1.size() == 1 && r2.size() == 1 && r1[0].keepPath == L"C:\\a.txt" && r2[0].keepPath == L"C:\\a.txt",
+          "empate de data mantem o mesmo arquivo em qualquer ordem de entrada");
+}
+
 } // namespace
 
 int main() {
+    TestSameDateTieBreaksByPath();
     TestNoFilesNoGroups();
     TestSingleFileIsNotDuplicate();
     TestTwoIdenticalFilesKeepsOldest();

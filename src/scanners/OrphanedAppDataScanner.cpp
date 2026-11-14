@@ -242,7 +242,7 @@ std::vector<std::wstring> CollectShortcutTargets(std::atomic<bool>& cancel) {
     for (const GUID& folder : {FOLDERID_Programs, FOLDERID_CommonPrograms}) {
         std::wstring root = util::KnownFolderPath(folder);
         if (!root.empty())
-            util::ForEachFileRecursive(root, cancel, [&](const std::wstring& path, std::uint64_t) { readShortcut(path); });
+            util::ForEachFileRecursive(root, cancel, [&](const util::FileEntry& entry) { readShortcut(entry.path); });
     }
     // Área de Trabalho: só o primeiro nível. Ela costuma guardar muita coisa
     // (projetos, downloads — nesta máquina, dezenas de milhares de arquivos)
@@ -387,6 +387,12 @@ void ScanAppDataRoot(const fs::path& root, const ScanContext& ctx, bool isCurren
         // `inactivityDays` dias nem é candidata.
         util::DirectoryStats stats =
             util::ComputeDirectoryStats(entry.path().wstring(), ctx.inactivityDays, cancel);
+        if (stats.totalBytes == 0 || stats.hasRecentActivity) continue;
+        // Quem passou é recontado com a data lida em cada arquivo: a da
+        // listagem pode estar atrasada para arquivo aberto, e uma pasta "parada"
+        // pode virar chance Baixa, que a limpeza automática leva.
+        stats = util::ComputeDirectoryStats(entry.path().wstring(), ctx.inactivityDays, cancel,
+                                            /*readDatesFromFiles=*/true);
         if (stats.totalBytes == 0 || stats.hasRecentActivity) continue;
 
         OrphanVerdict verdict =

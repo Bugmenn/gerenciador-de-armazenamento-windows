@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace storagecleaner {
@@ -25,6 +26,8 @@ struct ScanResult {
     std::vector<Category> skippedNeedAdmin;
     // Varridas só em parte por falta de elevação (IsPartiallyAdminCategory).
     std::vector<Category> partialNeedAdmin;
+    // Tempo de cada categoria que rodou, em ms (--scan-benchmark, diagnóstico).
+    std::vector<std::pair<Category, double>> categoryMillis;
 
     std::uint64_t GrandTotalBytes() const {
         std::uint64_t total = 0;

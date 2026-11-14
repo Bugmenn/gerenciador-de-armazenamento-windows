@@ -50,6 +50,7 @@ add_executable(StorageCleaner WIN32
     src/PathExclusion.cpp
     src/ItemGrouping.cpp
     src/OrphanClassifier.cpp
+    src/ScanBenchmark.cpp
     src/scanners/TempFilesScanner.cpp
     src/scanners/BrowserCacheScanner.cpp
     src/scanners/DuplicateScanner.cpp

@@ -1,4 +1,5 @@
 #include "storagecleaner/ProgressState.h"
+#include "storagecleaner/Utils.h"
 
 #include <cmath>
 #include <cstdio>
@@ -59,9 +60,53 @@ void TestChannelPreservesStage() {
     Check(Near(channel.Read().fractionComplete, 0.0f), "SetStage zera a fracao da etapa anterior");
 }
 
+void TestCombineParallelProgress() {
+    std::vector<ProgressSnapshot> parts(3);
+    parts[0].phase = Phase::ScanningTemp;
+    parts[0].fractionComplete = 0.3f;
+    parts[0].itemsProcessed = 5;
+    parts[1].phase = Phase::ScanningDuplicates;
+    parts[1].fractionComplete = 0.5f;
+    parts[1].itemsProcessed = 7;
+    parts[1].currentItem = L"C:\\x";
+    parts[2].phase = Phase::ScanningLogs;
+    parts[2].bytesFoundSoFar = 100;
+    ProgressSnapshot c = CombineParallelProgress(parts, {true, false, false});
+    Check(Near(OverallFraction(c), (1.0f + 0.5f + 0.0f) / 3.0f), "concluída conta 1, as outras pela fração");
+    Check(c.stagesDone == 1 && c.stageCount == 3, "conta categorias concluídas");
+    Check(c.itemsProcessed == 12 && c.bytesFoundSoFar == 100, "contadores somados");
+    Check(c.phase == Phase::ScanningDuplicates && c.currentItem == L"C:\\x",
+          "fase da primeira categoria ainda em andamento");
+
+    ProgressSnapshot empty = CombineParallelProgress({}, {});
+    Check(Near(OverallFraction(empty), 1.0f), "sem categorias = completo");
+}
+
+void TestOverallFractionOverride() {
+    ProgressSnapshot s;
+    s.stageIndex = 0;
+    s.stageCount = 4;
+    s.fractionComplete = 0.0f;
+    s.overallFraction = 0.75f;
+    Check(Near(OverallFraction(s), 0.75f), "overallFraction tem prioridade sobre as etapas");
+    s.overallFraction = 3.0f;
+    Check(Near(OverallFraction(s), 1.0f), "overallFraction limitado a 1");
+}
+
+void TestAgeHours() {
+    const std::int64_t now = 1000 * storagecleaner::util::kTicksPerHour;
+    Check(storagecleaner::util::AgeHoursAt(now - 5 * storagecleaner::util::kTicksPerHour, now) == 5, "5 horas");
+    Check(storagecleaner::util::AgeHoursAt(now - storagecleaner::util::kTicksPerHour + 1, now) == 0,
+          "menos de 1 hora arredonda para 0");
+    Check(storagecleaner::util::AgeHoursAt(now + 10, now) == 0, "data no futuro = 0");
+}
+
 } // namespace
 
 int main() {
+    TestCombineParallelProgress();
+    TestOverallFractionOverride();
+    TestAgeHours();
     TestWithoutStages();
     TestStages();
     TestClamps();

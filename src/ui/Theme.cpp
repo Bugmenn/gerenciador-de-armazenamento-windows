@@ -256,7 +256,10 @@ void DrawProgressRing(const ProgressSnapshot& snapshot) {
     DrawInlineCircularGauge(28.0f, 6.0f, overall, ImGui::ColorConvertFloat4ToU32(theme::kAccentBlue),
                             ImGui::ColorConvertFloat4ToU32(theme::kAccentGold),
                             ImGui::ColorConvertFloat4ToU32(theme::kBorder), percent);
-    if (snapshot.stageCount > 0)
+    if (snapshot.stagesDone >= 0 && snapshot.stageCount > 0)
+        ImGui::Text("%d de %d categorias concluídas - %s", snapshot.stagesDone, snapshot.stageCount,
+                    PhaseLabel(snapshot.phase));
+    else if (snapshot.stageCount > 0)
         ImGui::Text("Etapa %d de %d - %s", snapshot.stageIndex + 1, snapshot.stageCount,
                     PhaseLabel(snapshot.phase));
     else

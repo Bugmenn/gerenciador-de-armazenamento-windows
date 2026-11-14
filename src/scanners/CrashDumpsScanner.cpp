@@ -25,13 +25,16 @@ void AddItem(std::vector<ScanItem>& items, ProgressChannel& progress, ProgressSn
 void ScanDumpFiles(const fs::path& dir, const Config& config, ProgressChannel& progress,
                    std::atomic<bool>& cancel, std::vector<ScanItem>& items,
                    ProgressSnapshot& snapshot) {
-    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const std::wstring& path,
-                                                          std::uint64_t size) {
-        if (size < config.minFileSizeBytes) return;
+    const std::int64_t now = util::NowFileTimeTicks();
+    util::ForEachFileRecursive(dir.wstring(), cancel, [&](const util::FileEntry& entry) {
+        if (entry.sizeBytes < config.minFileSizeBytes) return;
         // Um dump sendo gravado agora (processo acabou de travar) ainda está
         // em uso pelo WER; espera o mesmo intervalo mínimo dos temporários.
-        if (!util::IsOlderThanHours(path, config.tempFilesMinAgeHours)) return;
-        AddItem(items, progress, snapshot, path, size, false);
+        // Data da listagem como filtro barato, reconfirmada no arquivo (a da
+        // listagem pode estar atrasada para arquivo aberto).
+        if (util::AgeHoursAt(entry.lastWriteTicks, now) < config.tempFilesMinAgeHours) return;
+        if (!util::IsOlderThanHours(entry.path, config.tempFilesMinAgeHours)) return;
+        AddItem(items, progress, snapshot, entry.path, entry.sizeBytes, false);
     });
 }
 
