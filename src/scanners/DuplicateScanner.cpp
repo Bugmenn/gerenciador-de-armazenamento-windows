@@ -1,4 +1,5 @@
 #include "storagecleaner/DuplicateGrouping.h"
+#include "storagecleaner/PathExclusion.h"
 #include "storagecleaner/Scanner.h"
 #include "storagecleaner/Utils.h"
 
@@ -85,6 +86,19 @@ std::vector<ScanItem> ScanDuplicates(const Config& config, ProgressChannel& prog
 
     std::vector<std::wstring> roots =
         config.duplicateScanRoots.empty() ? DefaultDuplicateRoots() : config.duplicateScanRoots;
+    // O app roda como Administrador e o config.json fica numa pasta que
+    // qualquer programa do usuário grava: uma raiz dentro do Windows ou de
+    // Program Files faria uma limpeza automática apagar "duplicados" do
+    // sistema. Duplicados de verdade do usuário nunca estão lá.
+    std::vector<std::wstring> systemRoots;
+    for (const GUID& folder : {FOLDERID_Windows, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86,
+                               FOLDERID_ProgramData}) {
+        std::wstring path = util::KnownFolderPath(folder);
+        if (!path.empty()) systemRoots.push_back(path);
+    }
+    std::erase_if(roots, [&](const std::wstring& root) {
+        return IsExcludedPath(root, true, systemRoots) || IsExcludedPath(root, false, systemRoots);
+    });
 
     // Passo 1: agrupa por tamanho exato. Arquivos de tamanhos diferentes
     // nunca são duplicados, então isso descarta a maioria dos arquivos sem

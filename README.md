@@ -209,6 +209,26 @@ confirmação, histórico), mas a limpeza **não exclui nada**: o histórico
 registra o que *seria* liberado, marcado como "(simulação)". Uma limpeza
 automática simulada não adia a próxima limpeza automática real.
 
+## Administrador
+
+O app roda sempre como Administrador — é o que permite verificar pontos de
+restauração, o cache do Windows Update e os relatórios de erro do sistema.
+Ao abrir pelo atalho, o Windows mostra o aviso do UAC uma vez; recusando, o
+app abre mesmo assim, só sem essas categorias (a tela avisa quais ficaram de
+fora). Em conta sem permissão de Administrador o app não pede elevação (o
+Windows pediria a senha de outra conta, e o app passaria a limpar os arquivos
+dela); abre normalmente, sem essas categorias. Para depurar sem elevação:
+`StorageCleaner.exe --no-elevate`.
+
+"Iniciar com o Windows" cria uma tarefa no Agendador de Tarefas
+("Otimizador de Armazenamento - Iniciar com o Windows") que abre o app na
+bandeja, já como Administrador e sem aviso, ao entrar no Windows. Ligar essa
+opção exige o app aberto como Administrador. Como a tarefa roda o programa com
+permissão de Administrador sem perguntar, o recomendado é deixar o
+`StorageCleaner.exe` em `C:\Program Files\Otimizador de Armazenamento\`
+(pasta que só o Administrador altera) antes de ligar a opção — a tela de
+Configurações avisa quando ele está em outro lugar.
+
 ## Pastas protegidas e alerta de espaço
 
 Na aba Configurações dá para proteger pastas: nada dentro delas é oferecido

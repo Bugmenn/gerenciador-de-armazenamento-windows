@@ -6,6 +6,7 @@
 #include "UiState.h"
 #include "storagecleaner/ConfigStore.h"
 #include "storagecleaner/Utils.h"
+#include "storagecleaner/VssRestorePoints.h"
 
 #include "resource.h"
 
@@ -110,6 +111,13 @@ void ShowMainWindow(HWND hwnd) {
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
+
+    // Explorer (re)criou a bandeja: sem isto, um app que subiu no logon antes
+    // dela — com a janela escondida — ficaria invisível e impossível de abrir.
+    if (msg == TaskbarCreatedMessage() && g_uiState && !g_uiState->selfTest) {
+        CreateTrayIcon(hwnd);
+        return 0;
+    }
 
     switch (msg) {
         case WM_ENDSESSION:
@@ -237,6 +245,13 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons, const std::wstri
     state.testBalloons = testBalloons;
     state.selfTest = selfTestMode;
     g_uiState = &state;
+    if (!selfTestMode) {
+        state.exeInProtectedFolder = ExecutableInProtectedFolder();
+        // Só migra quem ainda tem a entrada Run das versões sem elevação — e
+        // nunca recria a tarefa a partir do config.json (desligar sem salvar
+        // a faria voltar, e cada .exe aberto passaria a ser o do auto-início).
+        if (IsRunningElevated()) MigrateLegacyStartupEntry();
+    }
 
     HINSTANCE hInstance = ::GetModuleHandleW(nullptr);
     // Mesmo icone (resources/app.rc) usado na janela/taskbar e na bandeja
@@ -283,7 +298,10 @@ int RunApp(bool startMinimized, bool dryRun, bool testBalloons, const std::wstri
     ::UpdateWindow(hwnd);
     state.windowVisible = !startMinimized;
 
-    if (!selfTestMode) CreateTrayIcon(hwnd);
+    if (!selfTestMode) {
+        AllowTaskbarCreated(hwnd);
+        CreateTrayIcon(hwnd);
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

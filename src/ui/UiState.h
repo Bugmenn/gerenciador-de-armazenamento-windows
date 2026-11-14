@@ -156,6 +156,12 @@ struct UiState {
     // A última gravação automática das pastas protegidas foi pulada porque o
     // config.json existente estava ilegível (ver SettingsPanel).
     bool exclusionsSaveFailed = false;
+    // Última tentativa de ligar/desligar o "Iniciar com o Windows" falhou
+    // (registrar a tarefa agendada exige o app elevado).
+    bool startupTaskFailed = false;
+    // Calculado uma vez em RunApp (ExecutableInProtectedFolder): o .exe fora de
+    // Program Files torna o auto-início elevado arriscado — a UI avisa.
+    bool exeInProtectedFolder = true;
     bool requestExit = false;
     // --ui-selftest: dados fictícios, sem varredura leve, agendamento nem
     // alerta de disco (ver SelfTest.cpp).

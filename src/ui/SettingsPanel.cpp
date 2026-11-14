@@ -2,6 +2,7 @@
 #include "Panels.h"
 #include "Theme.h"
 #include "TrayIcon.h"
+#include "storagecleaner/VssRestorePoints.h"
 #include "storagecleaner/ConfigStore.h"
 #include "storagecleaner/Utils.h"
 
@@ -98,8 +99,36 @@ void DrawSettingsPanel(UiState& state) {
 
     ImGui::Separator();
     ImGui::TextUnformatted("Segundo plano");
-    if (ImGui::Checkbox("Iniciar com o Windows", &config.startWithWindows))
-        SetStartWithWindows(config.startWithWindows);
+    if (ImGui::Checkbox("Iniciar com o Windows", &config.startWithWindows)) {
+        // Falhou: volta o checkbox ao estado real.
+        state.startupTaskFailed = !SetStartWithWindows(config.startWithWindows);
+        if (state.startupTaskFailed) {
+            config.startWithWindows = !config.startWithWindows;
+        } else if (auto onDisk = TryLoadConfig()) {
+            // Grava na hora, só este campo (mesmo padrão das pastas
+            // protegidas): o estado da tarefa e o config.json não podem
+            // divergir por o usuário esquecer o "Salvar".
+            onDisk->startWithWindows = config.startWithWindows;
+            SaveConfig(*onDisk);
+        }
+    }
+    if (state.startupTaskFailed) {
+        ImGui::PushStyleColor(ImGuiCol_Text, theme::kWarning);
+        ImGui::TextWrapped("%s", IsRunningElevated()
+                                     ? "Não foi possível configurar o início com o Windows: o Agendador de "
+                                       "Tarefas recusou a tarefa."
+                                     : "Não foi possível configurar o início com o Windows - abra o app como "
+                                       "Administrador.");
+        ImGui::PopStyleColor();
+    }
+    if (config.startWithWindows && !state.exeInProtectedFolder) {
+        ImGui::PushStyleColor(ImGuiCol_Text, theme::kWarning);
+        ImGui::TextWrapped("O app inicia como Administrador sem pedir confirmação. Como o programa não está em "
+                           "\"Arquivos de Programas\", outro programa poderia trocá-lo e ganhar essa permissão. "
+                           "Recomendado: copiar o StorageCleaner.exe para C:\\Program Files\\Otimizador de "
+                           "Armazenamento\\ e ligar esta opção de lá.");
+        ImGui::PopStyleColor();
+    }
     ImGui::Checkbox("Minimizar para a bandeja ao fechar", &config.minimizeToTrayOnClose);
     // Minimo de 5 min (ver SanitizeConfig): a varredura leve roda em worker
     // thread propria mas ainda faz I/O real (Shell API + soma recursiva de

@@ -113,6 +113,8 @@ target_link_libraries(StorageCleaner PRIVATE
     crypt32
     shlwapi
     windowscodecs
+    taskschd
+    secur32
 )
 
 enable_testing()
