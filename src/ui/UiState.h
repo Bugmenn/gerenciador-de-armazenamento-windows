@@ -225,6 +225,8 @@ struct UiState {
         std::uint64_t bytes = 0;
         std::size_t count = 0;
         bool anyPermanent = false;
+        // Órfãos marcados com chance Média/Alta de o app ainda existir.
+        std::size_t riskyHeuristic = 0;
     };
     // Resumo da seleção sem copiar ScanItem (que carrega dois wstring cada) —
     // usado nos pontos desenhados a cada frame (total selecionado, modal de

@@ -16,6 +16,27 @@ namespace {
 
 ImU32 U32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
 
+// Cor e texto do grupo de nível (dados órfãos): Baixa = seguro, Alta = perigo.
+ImVec4 ChanceColor(ExistenceChance chance) {
+    switch (chance) {
+        case ExistenceChance::Low:    return theme::kSuccess;
+        case ExistenceChance::Medium: return theme::kWarning;
+        case ExistenceChance::High:   return theme::kDanger;
+        case ExistenceChance::NotApplicable: break;
+    }
+    return theme::kTextPrimary;
+}
+
+const char* ChanceGroupLabel(ExistenceChance chance) {
+    switch (chance) {
+        case ExistenceChance::Low:    return "Baixa chance de o app ainda existir";
+        case ExistenceChance::Medium: return "Média chance de o app ainda existir - revise";
+        case ExistenceChance::High:   return "Alta chance de o app ainda existir - não recomendado limpar";
+        case ExistenceChance::NotApplicable: break;
+    }
+    return "";
+}
+
 std::string Percent(std::uint64_t part, std::uint64_t total) {
     char buf[16];
     double pct = total ? 100.0 * static_cast<double>(part) / static_cast<double>(total) : 0.0;
@@ -41,6 +62,22 @@ std::string EllipsizeLeft(const std::string& text, float maxWidth) {
         if (prefixWidth + ImGui::CalcTextSize(text.c_str() + start).x <= maxWidth) break;
     }
     return kPrefix + text.substr(start);
+}
+
+// Corta o fim ("texto...") — para frases em que o começo é o que importa
+// (motivos do mais forte ao mais fraco, rótulo do nível).
+std::string EllipsizeRight(const std::string& text, float maxWidth) {
+    if (maxWidth <= 0.0f || ImGui::CalcTextSize(text.c_str()).x <= maxWidth) return text;
+    static const char kSuffix[] = "...";
+    float suffixWidth = ImGui::CalcTextSize(kSuffix).x;
+    std::size_t end = text.size();
+    while (end > 0) {
+        --end;
+        // Não parte um caractere UTF-8 ao meio (bytes de continuação 10xxxxxx).
+        while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) --end;
+        if (ImGui::CalcTextSize(text.c_str(), text.c_str() + end).x + suffixWidth <= maxWidth) break;
+    }
+    return text.substr(0, end) + kSuffix;
 }
 
 // Checkbox de três estados: o "misto" (alguns marcados) usa o traço do ImGui.
@@ -183,13 +220,18 @@ void DrawGroupRow(UiState& state, std::size_t bucketIdx, BucketView& view, std::
 
     ImGui::TableSetColumnIndex(1);
     bool open = state.IsGroupOpen(view, groupIdx);
-    std::string folder = group.folder.empty() ? std::string("(sem pasta)") : util::WideToUtf8(group.folder);
+    bool byChance = group.chance != ExistenceChance::NotApplicable;
+    std::string folder = byChance ? std::string(ChanceGroupLabel(group.chance))
+                         : group.folder.empty() ? std::string("(sem pasta)")
+                                                : util::WideToUtf8(group.folder);
     float avail = ImGui::GetContentRegionAvail().x - ImGui::GetTreeNodeToLabelSpacing();
-    std::string shown = EllipsizeLeft(folder, avail);
+    std::string shown = byChance ? EllipsizeRight(folder, avail) : EllipsizeLeft(folder, avail);
     ImGui::SetNextItemOpen(open, ImGuiCond_Always);
+    if (byChance) ImGui::PushStyleColor(ImGuiCol_Text, ChanceColor(group.chance));
     bool nowOpen = ImGui::TreeNodeEx("##node", ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding |
                                                    ImGuiTreeNodeFlags_SpanAvailWidth,
                                      "%s", shown.c_str());
+    if (byChance) ImGui::PopStyleColor();
     if (ImGui::IsItemHovered() && shown != folder) ImGui::SetTooltip("%s", folder.c_str());
     if (nowOpen != open) state.ToggleGroup(bucketIdx, groupIdx);
 
@@ -205,7 +247,9 @@ void DrawGroupRow(UiState& state, std::size_t bucketIdx, BucketView& view, std::
 void DrawItemRow(UiState& state, std::size_t bucketIdx, const BucketView& view, const ResultRow& row) {
     const ScanItem& item = state.lastScanResult.buckets[bucketIdx].items[row.item];
     auto& sel = state.selection[bucketIdx];
-    bool inGroup = view.groups[row.group].itemIndices.size() > 1;
+    // Grupo de nível sempre tem cabeçalho (ver GetBucketView), mesmo com 1 item.
+    bool inGroup = view.groups[row.group].itemIndices.size() > 1 ||
+                   view.groups[row.group].chance != ExistenceChance::NotApplicable;
 
     ImGui::TableSetColumnIndex(0);
     bool isSelected = row.item < sel.size() && sel[row.item];
@@ -221,12 +265,17 @@ void DrawItemRow(UiState& state, std::size_t bucketIdx, const BucketView& view, 
     std::string detail;
     if (item.category == Category::Duplicate && !item.keepPath.empty())
         detail = "mantém: " + util::WideToUtf8(item.keepPath);
+    else if (!item.evidence.empty())
+        // Pasta-pai curta (Roaming/Local/LocalLow) antes dos motivos: "Foo"
+        // de Roaming e de Local apareceriam iguais sem ela.
+        detail = util::WideToUtf8(std::wstring(FileNameOf(ParentFolder(item.path)))) + " - " + item.evidence;
     else if (!inGroup && !view.groups[row.group].folder.empty())
         detail = util::WideToUtf8(view.groups[row.group].folder);
     if (!detail.empty()) {
         ImGui::SameLine();
         float avail = ImGui::GetContentRegionAvail().x;
-        ImGui::TextDisabled("%s", EllipsizeLeft(detail, avail).c_str());
+        bool isPath = item.evidence.empty();
+        ImGui::TextDisabled("%s", (isPath ? EllipsizeLeft(detail, avail) : EllipsizeRight(detail, avail)).c_str());
         hovered |= ImGui::IsItemHovered();
     }
     if (inGroup) ImGui::Unindent(ImGui::GetTreeNodeToLabelSpacing());
@@ -236,6 +285,11 @@ void DrawItemRow(UiState& state, std::size_t bucketIdx, const BucketView& view, 
         if (item.isDirectory) ImGui::TextDisabled("Pasta inteira");
         if (item.category == Category::Duplicate && !item.keepPath.empty())
             ImGui::TextDisabled("Original mantido: %s", util::WideToUtf8(item.keepPath).c_str());
+        if (item.existenceChance != ExistenceChance::NotApplicable) {
+            ImGui::TextColored(ChanceColor(item.existenceChance), "Chance de o app ainda existir: %s",
+                               ExistenceChanceLabel(item.existenceChance));
+            if (!item.evidence.empty()) ImGui::TextDisabled("Sinais: %s", item.evidence.c_str());
+        }
         ImGui::EndTooltip();
     }
 
@@ -254,9 +308,11 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
     const CategoryBucket& bucket = state.lastScanResult.buckets[bucketIdx];
 
     if (IsHeuristicCategory(bucket.category)) {
-        ImGui::TextColored(theme::kWarning,
-                           "Heurístico: pode incluir falsos positivos (ex.: apps portáteis ou "
-                           "pouco usados). Revise cada item antes de excluir.");
+        ImGui::PushStyleColor(ImGuiCol_Text, theme::kWarning);
+        ImGui::TextWrapped("Heurístico: pastas de apps que parecem desinstalados, separadas pela chance "
+                           "de o app ainda existir (processo rodando, atalho, registro, programas na "
+                           "pasta, tempo sem uso). A limpeza automática só leva as de chance Baixa.");
+        ImGui::PopStyleColor();
     }
 
     BucketView& view = state.GetBucketView(bucketIdx);
@@ -266,9 +322,7 @@ void DrawCategoryTable(UiState& state, std::size_t bucketIdx) {
         return;
     }
 
-    // "Selecionar todos" fica disponivel mesmo para a categoria heuristica,
-    // mas ela nunca comeca marcada sozinha (ver UiState::AdoptScanResult). Com filtro,
-    // age só sobre o que está à vista.
+    // Com filtro, "Selecionar todos" age só sobre o que está à vista.
     char selectLabel[64];
     if (state.IsFilterActive())
         std::snprintf(selectLabel, sizeof(selectLabel), "Selecionar visíveis (%zu)###all", view.visibleItems);
@@ -463,6 +517,11 @@ void DrawResultsPanel(UiState& state) {
             ImGui::TextColored(theme::kDanger,
                               "Atenção: Lixeira e/ou pontos de restauração selecionados serão "
                               "removidos em definitivo, sem opção de desfazer.");
+        if (selection.riskyHeuristic > 0)
+            ImGui::TextColored(theme::kDanger,
+                               "Atenção: %zu pasta(s) com chance média/alta de o app ainda existir "
+                               "estão marcadas (vão para a Lixeira).",
+                               selection.riskyHeuristic);
 
         // A lista completa de itens (com paths) só precisa existir de fato no
         // clique do botão — não a cada frame enquanto o modal fica aberto.

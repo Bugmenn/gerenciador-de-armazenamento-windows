@@ -15,7 +15,7 @@ void DrawDashboardPanel(UiState& state) {
         if (ImGui::Checkbox(CategoryName(c), &enabled)) state.config.perCategory[c].enabled = enabled;
         if (IsHeuristicCategory(c)) {
             ImGui::SameLine();
-            ImGui::TextDisabled("(heurístico - revise antes de excluir)");
+            ImGui::TextDisabled("(heurístico - separado pela chance de o app ainda existir)");
         }
     }
 

@@ -6,7 +6,9 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cwctype>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -145,16 +147,25 @@ void ForEachFileRecursive(const std::wstring& dir, std::atomic<bool>& cancel,
 DirectoryStats ComputeDirectoryStats(const std::wstring& dir, int thresholdDays,
                                      std::atomic<bool>& cancel) {
     DirectoryStats stats;
-    auto threshold =
-        fs::file_time_type::clock::now() - std::chrono::hours(static_cast<long long>(thresholdDays) * 24);
+    const auto now = fs::file_time_type::clock::now();
+    auto threshold = now - std::chrono::hours(static_cast<long long>(thresholdDays) * 24);
+    std::optional<fs::file_time_type> newest;
 
     ForEachFileRecursive(dir, cancel, [&](const std::wstring& path, std::uint64_t size) {
         stats.totalBytes += size;
+        std::wstring ext = fs::path(path).extension().wstring();
+        for (auto& ch : ext) ch = static_cast<wchar_t>(std::towlower(ch));
+        if (ext == L".exe") ++stats.executableCount;
 
         std::error_code timeEc;
         auto writeTime = fs::last_write_time(path, timeEc);
-        if (!timeEc && writeTime >= threshold) stats.hasRecentActivity = true;
+        if (timeEc) return;
+        if (writeTime >= threshold) stats.hasRecentActivity = true;
+        if (!newest || writeTime > *newest) newest = writeTime;
     });
+    if (newest && *newest < now)
+        stats.daysSinceNewestWrite =
+            static_cast<int>(std::chrono::duration_cast<std::chrono::hours>(now - *newest).count() / 24);
     return stats;
 }
 

@@ -33,6 +33,9 @@ struct ItemGroup {
     std::wstring folder;
     std::vector<std::size_t> itemIndices;
     std::uint64_t totalBytes = 0;
+    // Grupo por nível (GroupItemsByExistenceChance); NotApplicable nos grupos
+    // por pasta. Num grupo por nível, `folder` só serve de chave estável.
+    ExistenceChance chance = ExistenceChance::NotApplicable;
 };
 
 // Agrupa por pasta só os itens que passam no filtro. Grupos são ordenados pelo
@@ -42,6 +45,14 @@ struct ItemGroup {
 std::vector<ItemGroup> GroupItemsByFolder(const std::vector<ScanItem>& items,
                                           const ItemFilter& filter, ItemSortKey sortKey,
                                           bool descending);
+
+// Agrupa pela chance de o app ainda existir (categorias heurísticas): grupos
+// sempre na ordem Baixa, Média, Alta — a ordem de risco não muda com a
+// ordenação escolhida; ela só ordena os itens dentro de cada grupo. Grupos
+// vazios não aparecem; item sem nível entra em Alta (o lado seguro).
+std::vector<ItemGroup> GroupItemsByExistenceChance(const std::vector<ScanItem>& items,
+                                                   const ItemFilter& filter, ItemSortKey sortKey,
+                                                   bool descending);
 
 // Bytes encontrados por letra de unidade (maiúscula), para a rosca de cada
 // unidade no Painel. Itens sem caminho "X:\..." (Lixeira, shadow copies) não

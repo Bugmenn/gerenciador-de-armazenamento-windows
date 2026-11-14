@@ -81,8 +81,10 @@ inline constexpr bool IsPermanentCategory(Category c) {
 }
 
 // "Dados orfaos" é heurístico (pode dar falso positivo em apps portáteis ou
-// pouco usados) — por isso nunca participa da limpeza automática nem vem
-// pré-selecionado na revisão manual; o usuário sempre marca item a item.
+// pouco usados): cada item traz a chance de o app ainda existir
+// (ExistenceChance) e a limpeza automática só leva os de chance Baixa (ver
+// IsAutoCleanEligible). Na revisão manual tudo vem marcado, e a confirmação
+// avisa quando há Média/Alta selecionados.
 inline constexpr bool IsHeuristicCategory(Category c) {
     return c == Category::OrphanedApps;
 }
@@ -100,7 +102,24 @@ inline constexpr bool IsPartiallyAdminCategory(Category c) {
     return c == Category::CrashDumps;
 }
 
+// Chance de o aplicativo dono de uma pasta "órfã" ainda existir no PC
+// (OrphanClassifier.h). Só as categorias heurísticas usam; o resto fica em
+// NotApplicable.
+enum class ExistenceChance : std::uint8_t { NotApplicable, Low, Medium, High };
+
+inline const char* ExistenceChanceLabel(ExistenceChance c) {
+    switch (c) {
+        case ExistenceChance::Low:    return "Baixa";
+        case ExistenceChance::Medium: return "Média";
+        case ExistenceChance::High:   return "Alta";
+        case ExistenceChance::NotApplicable: break;
+    }
+    return "";
+}
+
 // Representa um item encontrado pelo scanner que pode ser removido para liberar espaço.
+// Os campos novos ficam no fim para os scanners seguirem com o init agregado
+// ScanItem{path, size, categoria, keepPath, isDirectory}.
 struct ScanItem {
     std::wstring path;
     std::uint64_t sizeBytes = 0;
@@ -110,6 +129,16 @@ struct ScanItem {
     // Se true, o "path" é um diretório inteiro a remover (ex: pasta de cache),
     // caso contrário é um arquivo único.
     bool isDirectory = false;
+    ExistenceChance existenceChance = ExistenceChance::NotApplicable;
+    // Motivos da classificação (UTF-8, pt-BR, só Latin-1 — vai direto à UI).
+    std::string evidence;
 };
+
+// A limpeza automática nunca leva um órfão que pode pertencer a um app
+// ainda instalado: da categoria heurística, só os de chance Baixa (decisão
+// do usuário). Na revisão manual quem decide é ele.
+inline bool IsAutoCleanEligible(const ScanItem& item) {
+    return !IsHeuristicCategory(item.category) || item.existenceChance == ExistenceChance::Low;
+}
 
 } // namespace storagecleaner

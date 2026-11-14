@@ -138,8 +138,8 @@ void DrawSettingsPanel(UiState& state) {
             config.autoCleanMode = mode;
     }
     ImGui::TextDisabled(
-        "\"Dados órfãos\" nunca entra na limpeza automática, mesmo com \"Excluir "
-        "automaticamente\" selecionado - exige sempre revisão manual.");
+        "Dos \"Dados órfãos\", a limpeza automática só leva as pastas com chance Baixa de o "
+        "app ainda existir; Média e Alta exigem revisão manual.");
 
     ImGui::Separator();
     if (ImGui::Button("Salvar configurações", ImVec2(200, 0))) {

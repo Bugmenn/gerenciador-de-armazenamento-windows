@@ -11,6 +11,22 @@ foi feito — decisões e causas raiz que valem para a próxima sessão vão par
 
 ## Registro de Atividades Recentes
 
+### [2026-11-14] Dados órfãos: níveis de chance Baixa/Média/Alta
+**O que foi feito:** Pedido do usuário: análise melhor dos órfãos + separar por chance de o app ainda existir. Scanner coleta sinais (processo rodando da pasta, Run/RunOnce, destino de atalhos .lnk sem `Resolve`, InstallLocation/DisplayIcon/UninstallString e Publisher do Uninstall, .exe na pasta, chave `Software\<nome>`, dias desde a última escrita) e a regra pura `ClassifyOrphan` decide: Alta = sinal forte; Média = só fracos, escrita < 365 dias ou outro perfil; Baixa = nenhum. Decisões do usuário (pedidas em 3 rodadas no plano): categoria ligada por padrão, tudo pré-marcado, automática só leva Baixa (`IsAutoCleanEligible`), Alta visível em vermelho; confirmação manual avisa Média/Alta. Resultados agrupam órfãos por nível. Revisão final A + B cega: corrigidos texto falso em Configurações, outros perfis/Default caindo em Baixa (agora Média), varredura recursiva da Área de Trabalho (36.808 arquivos nesta máquina; agora só 1º nível), motivo forte cortado (EllipsizeRight), pasta-pai na linha, normalização única, `ReadRegString` com buffer dinâmico e `%VAR%`. Não aplicado: mover `ComScope` para `Utils.h` (o header é livre de `windows.h` de propósito). Build 0/0, ctest 6/6, `--ui-selftest` OK (passos `orfaos-niveis`, `confirmacao-orfaos`). Pendente: usuário marcar "Dados órfãos" (config salva mantém o valor antigo) e escanear em `--dry-run` para ver os níveis reais.
+**Arquivos alterados:**
+- `include/storagecleaner/OrphanClassifier.h`, `src/OrphanClassifier.cpp`, `tests/test_orphan_classifier.cpp` *(novos)*
+- `include/storagecleaner/ScanItem.h` — `ExistenceChance`, `evidence`, `IsAutoCleanEligible`
+- `src/scanners/OrphanedAppDataScanner.cpp` — coleta de sinais
+- `include/storagecleaner/Utils.h`, `src/Utils.cpp` — `ComputeDirectoryStats` com `executableCount`/`daysSinceNewestWrite`
+- `include/storagecleaner/ItemGrouping.h`, `src/ItemGrouping.cpp`, `tests/test_item_grouping.cpp` — `GroupItemsByExistenceChance`
+- `src/Config.cpp` — todas as categorias ligadas por padrão
+- `src/ui/UiState.*`, `ResultsPanel.cpp`, `SettingsPanel.cpp`, `DashboardPanel.cpp`, `SelfTest.cpp`
+- `CMakeLists.txt`, `tests/CMakeLists.txt`, `README.md`, `CLAUDE.md`, `.claude/docs/ui-imgui.md`
+
+### [2026-11-12] Release v0.2.0 publicada (GitHub Releases)
+**O que foi feito:** Build Release limpo (`ninja -t clean` + build em `out/build/x64-Release`, 58/58, 0 erros/0 warnings), ctest 5/5, `--ui-selftest` no binário Release OK (PNGs conferidos), smoke `--dry-run --startup` exit 0, `dumpbin /dependents` = só CRT dinâmico + DLLs do sistema (aviso do VC++ Redistributable mantido). `gh release create v0.2.0 --target 1c79452` com o `.exe` (904.192 bytes) e notas em pt-BR para quem baixa. https://github.com/Bugmenn/gerenciador-de-armazenamento-windows/releases/tag/v0.2.0 — Latest. Pitfall: `gh release view --json` não tem `isLatest`; conferir com `gh release list`.
+**Arquivos alterados:** nenhum no código-fonte — só a tag `v0.2.0` e o asset da release.
+
 ### [2026-11-10] CLAUDE.md revisado (/init) + perfis do Visual Studio
 **O que foi feito:** Cabeçalho padrão do /init; comandos reais desta máquina (`out\build\x64-*`, `ctest` pelo caminho do VS); pitfalls de UI ImGui movidos para `.claude/docs/ui-imgui.md` (primeiro doc por domínio); pitfalls novos de heredoc longo e quebra de linha mista; leitura obrigatória enxuta. Perfis em `.vs/launch.vs.json` (local, gitignored): simulação, teste automático da UI, balões.
 **Arquivos alterados:**

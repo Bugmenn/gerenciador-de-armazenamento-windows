@@ -9,9 +9,10 @@ Config Config::Defaults() {
     Config config;
     for (Category c : kAllCategories) {
         CategoryConfig catConfig;
-        // "Dados órfãos" é heurístico (ver ScanItem.h / IsHeuristicCategory):
-        // fica desligado até o usuário revisar e habilitar conscientemente.
-        catConfig.enabled = !IsHeuristicCategory(c);
+        // Todas ligadas, inclusive "Dados órfãos" (decisão do usuário): a
+        // proteção dessa categoria heurística está nos níveis de chance
+        // (ver ScanItem.h / IsAutoCleanEligible), não em vir desligada.
+        catConfig.enabled = true;
         config.perCategory[c] = catConfig;
     }
     return config;

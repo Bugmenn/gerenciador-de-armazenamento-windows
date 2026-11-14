@@ -18,6 +18,30 @@ bool MatchesNormalized(const ScanItem& item, const std::wstring& needle, std::ui
     return NormalizePathForCompare(item.path).find(needle) != std::wstring::npos;
 }
 
+// Ordena os itens de cada grupo por tamanho ou nome; empate cai no nome e
+// depois no índice, para a lista não "pular" entre reconstruções.
+void SortItemsInGroups(std::vector<ItemGroup>& groups, const std::vector<ScanItem>& items,
+                       ItemSortKey sortKey, bool descending) {
+    // Chaves de nome pré-calculadas: normalizar dentro do comparador custaria
+    // uma alocação por comparação em listas de milhares de itens.
+    std::vector<std::wstring> nameKey(items.size());
+    for (const auto& group : groups)
+        for (std::size_t i : group.itemIndices)
+            nameKey[i] = NormalizePathForCompare(std::wstring(FileNameOf(items[i].path)));
+
+    auto itemLess = [&](std::size_t a, std::size_t b) {
+        if (sortKey == ItemSortKey::Size && items[a].sizeBytes != items[b].sizeBytes)
+            return descending ? items[a].sizeBytes > items[b].sizeBytes
+                              : items[a].sizeBytes < items[b].sizeBytes;
+        if (nameKey[a] != nameKey[b])
+            return (sortKey == ItemSortKey::Name && descending) ? nameKey[a] > nameKey[b]
+                                                                : nameKey[a] < nameKey[b];
+        return a < b;
+    };
+    for (auto& group : groups)
+        std::sort(group.itemIndices.begin(), group.itemIndices.end(), itemLess);
+}
+
 } // namespace
 
 std::wstring_view ParentFolder(std::wstring_view path) {
@@ -57,24 +81,7 @@ std::vector<ItemGroup> GroupItemsByFolder(const std::vector<ScanItem>& items,
         group.totalBytes += items[i].sizeBytes;
     }
 
-    // Chaves de nome pré-calculadas: normalizar dentro do comparador custaria
-    // uma alocação por comparação em listas de milhares de itens.
-    std::vector<std::wstring> nameKey(items.size());
-    for (const auto& group : groups)
-        for (std::size_t i : group.itemIndices)
-            nameKey[i] = NormalizePathForCompare(std::wstring(FileNameOf(items[i].path)));
-
-    auto itemLess = [&](std::size_t a, std::size_t b) {
-        if (sortKey == ItemSortKey::Size && items[a].sizeBytes != items[b].sizeBytes)
-            return descending ? items[a].sizeBytes > items[b].sizeBytes
-                              : items[a].sizeBytes < items[b].sizeBytes;
-        if (nameKey[a] != nameKey[b])
-            return (sortKey == ItemSortKey::Name && descending) ? nameKey[a] > nameKey[b]
-                                                                : nameKey[a] < nameKey[b];
-        return a < b;
-    };
-    for (auto& group : groups)
-        std::sort(group.itemIndices.begin(), group.itemIndices.end(), itemLess);
+    SortItemsInGroups(groups, items, sortKey, descending);
 
     std::vector<std::wstring> folderKey;
     folderKey.reserve(groups.size());
@@ -95,6 +102,35 @@ std::vector<ItemGroup> GroupItemsByFolder(const std::vector<ScanItem>& items,
     sorted.reserve(groups.size());
     for (std::size_t i : order) sorted.push_back(std::move(groups[i]));
     return sorted;
+}
+
+std::vector<ItemGroup> GroupItemsByExistenceChance(const std::vector<ScanItem>& items,
+                                                   const ItemFilter& filter, ItemSortKey sortKey,
+                                                   bool descending) {
+    const ExistenceChance order[] = {ExistenceChance::Low, ExistenceChance::Medium, ExistenceChance::High};
+    std::vector<ItemGroup> groups;
+    for (ExistenceChance chance : order) {
+        ItemGroup group;
+        group.chance = chance;
+        // Chave estável para o estado aberto/fechado da UI (toggledFolders).
+        group.folder = std::wstring(L"chance:") + static_cast<wchar_t>(L'0' + static_cast<int>(chance));
+        groups.push_back(std::move(group));
+    }
+
+    const std::wstring needle = NormalizePathForCompare(filter.needle);
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (!MatchesNormalized(items[i], needle, filter.minBytes)) continue;
+        std::size_t slot = 2;
+        if (items[i].existenceChance == ExistenceChance::Low) slot = 0;
+        else if (items[i].existenceChance == ExistenceChance::Medium) slot = 1;
+        groups[slot].itemIndices.push_back(i);
+        groups[slot].totalBytes += items[i].sizeBytes;
+    }
+    groups.erase(std::remove_if(groups.begin(), groups.end(),
+                                [](const ItemGroup& g) { return g.itemIndices.empty(); }),
+                 groups.end());
+    SortItemsInGroups(groups, items, sortKey, descending);
+    return groups;
 }
 
 std::map<wchar_t, std::uint64_t> CleanableBytesByDrive(const std::vector<CategoryBucket>& buckets) {

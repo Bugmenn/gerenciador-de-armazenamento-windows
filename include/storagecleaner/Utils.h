@@ -42,6 +42,10 @@ struct DirectoryStats {
     // true se algum arquivo da árvore (em qualquer profundidade) foi escrito
     // há menos de `thresholdDays` dias, conforme passado a ComputeDirectoryStats.
     bool hasRecentActivity = false;
+    // Arquivos .exe na árvore (sinal de app portátil/instalado por usuário).
+    std::uint32_t executableCount = 0;
+    // Dias desde a escrita mais recente de qualquer arquivo da árvore (0 se vazia).
+    int daysSinceNewestWrite = 0;
 };
 
 // Callback chamado para cada arquivo regular encontrado por ForEachFileRecursive.

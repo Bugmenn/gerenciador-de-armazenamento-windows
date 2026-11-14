@@ -92,9 +92,40 @@ void TestCleanableByDrive() {
     Check(byDrive[L'D'] == 200, "D com '/'");
 }
 
+ScanItem Orphan(const wchar_t* path, std::uint64_t size, ExistenceChance chance) {
+    ScanItem item{path, size, Category::OrphanedApps, L"", true};
+    item.existenceChance = chance;
+    return item;
+}
+
+void TestGroupingByExistenceChance() {
+    const std::vector<ScanItem> orphans = {
+        Orphan(L"C:\\A\\Alta", 900, ExistenceChance::High),           // 0
+        Orphan(L"C:\\A\\Baixa1", 10, ExistenceChance::Low),           // 1
+        Orphan(L"C:\\B\\Baixa2", 50, ExistenceChance::Low),           // 2
+        Orphan(L"C:\\A\\SemNivel", 5, ExistenceChance::NotApplicable), // 3
+    };
+    // Ordenação por tamanho decrescente não pode tirar Baixa do topo: a ordem
+    // dos grupos é a de risco, não a de tamanho.
+    auto groups = GroupItemsByExistenceChance(orphans, {}, ItemSortKey::Size, true);
+    Check(groups.size() == 2, "grupo Média vazio não aparece");
+    if (groups.size() != 2) return;
+    Check(groups[0].chance == ExistenceChance::Low && groups[1].chance == ExistenceChance::High,
+          "Baixa antes de Alta mesmo com Alta maior");
+    Check(groups[0].itemIndices == std::vector<std::size_t>({2, 1}), "itens de Baixa por tamanho");
+    Check(groups[0].totalBytes == 60, "total do grupo Baixa");
+    Check(groups[1].itemIndices == std::vector<std::size_t>({0, 3}), "sem nível vai para Alta");
+    Check(groups[0].folder != groups[1].folder, "chave estável distinta por nível");
+
+    auto filtered = GroupItemsByExistenceChance(orphans, ItemFilter{L"baixa2", 0}, ItemSortKey::Size, true);
+    Check(filtered.size() == 1 && filtered[0].itemIndices == std::vector<std::size_t>({2}),
+          "filtro vale dentro dos níveis");
+}
+
 } // namespace
 
 int main() {
+    TestGroupingByExistenceChance();
     TestFolderAndName();
     TestGroupingBySizeDescending();
     TestGroupingByNameAscending();

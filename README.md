@@ -25,18 +25,27 @@ e a UI mostra um aviso em vez de falhar.
 | Logs antigos | `*.log` mais antigos que um limite configurável, em `Windows\Logs`, `ProgramData` e `AppData\Local` | Lixeira (reversível) |
 | Lixeira | Tamanho total ocupado pela própria Lixeira | **Permanente** (esvaziar não tem "desfazer") |
 | Pontos de restauração | Shadow copies (VSS) além do número configurado a manter | **Permanente** (requer executar como Administrador) |
-| Dados órfãos | Pastas em `AppData` de aplicativos que não aparecem mais na lista de programas instalados nem em `Program Files`, e que estão inativas há um tempo mínimo configurável | Lixeira (reversível) — **desabilitado por padrão** |
+| Dados órfãos | Pastas em `AppData` de aplicativos que não aparecem mais na lista de programas instalados nem em `Program Files`, e que estão inativas há um tempo mínimo configurável, separadas pela chance de o app ainda existir (Baixa / Média / Alta) | Lixeira (reversível) |
 | Cache do Windows Update | Conteúdo de `Windows\SoftwareDistribution\Download` sem atividade no último dia (a pasta em si é mantida) | Lixeira (reversível) — requer Administrador |
 | Despejos e relatórios de erro | `Windows\Minidump`, `Windows\MEMORY.DMP`, `AppData\Local\CrashDumps` de cada usuário e relatórios do WER em `ProgramData` | Lixeira (reversível) |
 | Cache de miniaturas | `thumbcache_*.db` e `iconcache_*.db` do Explorer (os que o Explorer estiver usando no momento são pulados) | Lixeira (reversível) |
 
-**Sobre "Dados órfãos":** essa categoria é heurística — compara nomes de
-pastas de AppData contra o registro de programas instalados e as pastas de
-`Program Files`, mas pode gerar falsos positivos (ex.: um aplicativo portátil
-raramente aberto). Por isso ela: vem desligada até o usuário habilitar
-manualmente nas Configurações; nunca vem pré-selecionada na revisão de
-resultados (cada item precisa ser marcado manualmente); nunca entra na
-limpeza automática agendada, mesmo que esteja habilitada.
+**Sobre "Dados órfãos":** essa categoria é heurística. Primeiro descarta as
+pastas cujo nome casa com um programa instalado (registro de desinstalação)
+ou com uma pasta de `Program Files`, e as que tiveram escrita recente. Para
+cada pasta que sobra, procura sinais de que o app ainda existe e separa em
+três níveis:
+
+| Chance de o app ainda existir | Quando |
+|---|---|
+| **Alta** (vermelho) | um programa está rodando de dentro da pasta, o Windows o inicia no logon (`Run`/`RunOnce`), há atalho no Menu Iniciar/Área de Trabalho apontando para ela, um app instalado aponta para ela, ou o nome da pasta é o fabricante de um app instalado |
+| **Média** (amarelo) | só sinais fracos: há programas (`.exe`) dentro dela, existe configuração com o nome dela no registro, houve escrita há menos de 1 ano, ou a pasta é de outro perfil de usuário (os sinais disponíveis são os de quem roda o app, então não dá para ter certeza) |
+| **Baixa** (verde) | nenhum sinal do app e sem escrita há 1 ano ou mais |
+
+Cada pasta mostra os motivos ao lado do nome. A categoria vem ligada por
+padrão e, na revisão manual, todos os níveis vêm marcados — a confirmação
+avisa quantas pastas de chance Média/Alta estão marcadas. A **limpeza
+automática só leva as de chance Baixa**. Tudo vai para a Lixeira.
 
 ## Como funciona
 
@@ -152,10 +161,10 @@ uma gravação.
   `history.json` (as mais antigas são descartadas); dentro de cada execução,
   no máximo 5.000 itens individuais são listados (os totais de bytes
   liberados continuam exatos mesmo quando a lista de itens é truncada).
-- **Dados órfãos é sempre a única categoria heurística**: vem desligada por
-  padrão, nunca pré-selecionada numa varredura, e nunca entra na limpeza
-  automática mesmo se o usuário a habilitar manualmente — sempre exige
-  revisão item a item.
+- **Dados órfãos é a única categoria heurística**: cada pasta é classificada
+  pela chance de o app ainda existir (Baixa / Média / Alta); a limpeza
+  automática só leva as de chance Baixa, e na revisão manual a confirmação
+  avisa quando há Média/Alta marcadas.
 - **Pontos de restauração sem privilégio de Administrador**: a listagem e a
   remoção de shadow copies simplesmente retornam vazio/sem efeito na hora,
   sem chegar a chamar o `vssadmin` — e quando chamado, é sempre resolvido

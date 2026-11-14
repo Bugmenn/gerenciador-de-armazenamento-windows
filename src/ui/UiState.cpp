@@ -131,6 +131,8 @@ UiState::SelectionSummary UiState::GetSelectionSummary() const {
             summary.bytes += bucket.items[itemIdx].sizeBytes;
             summary.count++;
             if (permanent) summary.anyPermanent = true;
+            ExistenceChance chance = bucket.items[itemIdx].existenceChance;
+            if (chance == ExistenceChance::Medium || chance == ExistenceChance::High) summary.riskyHeuristic++;
         }
     }
     return summary;
@@ -186,8 +188,9 @@ void UiState::AdoptScanResult(ScanResult result) {
     lastScanResult = std::move(result);
     selection.assign(lastScanResult.buckets.size(), {});
     for (std::size_t i = 0; i < lastScanResult.buckets.size(); ++i) {
-        bool preselect = !IsHeuristicCategory(lastScanResult.buckets[i].category);
-        selection[i].assign(lastScanResult.buckets[i].items.size(), preselect);
+        // Tudo marcado, inclusive os órfãos de qualquer nível (decisão do
+        // usuário); a confirmação avisa quando há Média/Alta na seleção.
+        selection[i].assign(lastScanResult.buckets[i].items.size(), true);
     }
     // Varredura nova: pastas voltam a fechar, mas a ordenação escolhida
     // fica — a tabela do ImGui guarda a seta do cabeçalho e não seria
@@ -225,7 +228,10 @@ bool UiState::IsFilterActive() const { return resultsFilter[0] != '\0' || result
 
 bool UiState::IsGroupOpen(const BucketView& view, std::size_t groupIdx) const {
     if (groupIdx >= view.groups.size()) return false;
-    bool openByDefault = resultsFilter[0] != '\0';
+    // Grupos de nível (órfãos) são poucos e o nível é a informação principal:
+    // começam abertos.
+    bool openByDefault = resultsFilter[0] != '\0' ||
+                         view.groups[groupIdx].chance != ExistenceChance::NotApplicable;
     return openByDefault != (view.toggledFolders.count(view.groups[groupIdx].folder) > 0);
 }
 
@@ -240,8 +246,11 @@ BucketView& UiState::GetBucketView(std::size_t bucketIdx) {
         // O padrão aberto/fechado muda com o texto do filtro; inversões
         // feitas sob o padrão anterior não valem mais.
         if (view.builtNeedle.empty() != filter.needle.empty()) view.toggledFolders.clear();
-        view.groups = GroupItemsByFolder(lastScanResult.buckets[bucketIdx].items, filter,
-                                         view.sortKey, view.sortDescending);
+        const CategoryBucket& bucket = lastScanResult.buckets[bucketIdx];
+        view.groups = IsHeuristicCategory(bucket.category)
+                          ? GroupItemsByExistenceChance(bucket.items, filter, view.sortKey,
+                                                        view.sortDescending)
+                          : GroupItemsByFolder(bucket.items, filter, view.sortKey, view.sortDescending);
         view.visibleItems = 0;
         for (const auto& group : view.groups) view.visibleItems += group.itemIndices.size();
         view.builtVersion = resultVersion;
@@ -255,7 +264,9 @@ BucketView& UiState::GetBucketView(std::size_t bucketIdx) {
         view.rows.clear();
         for (std::size_t g = 0; g < view.groups.size(); ++g) {
             const ItemGroup& group = view.groups[g];
-            if (group.itemIndices.size() == 1) {
+            // Pasta com um item só vira linha direta; grupo de nível nunca —
+            // senão o nível sumiria da tela.
+            if (group.itemIndices.size() == 1 && group.chance == ExistenceChance::NotApplicable) {
                 view.rows.push_back(ResultRow{g, group.itemIndices[0]});
                 continue;
             }
@@ -349,19 +360,18 @@ void UiState::Tick() {
     }
 
     // Absorve o resultado da varredura, se pronto, e prepara a seleção
-    // (todas as categorias, exceto as heurísticas, já vêm marcadas).
+    // (tudo vem marcado; ver AdoptScanResult).
     ScanResult freshResult;
     if (scanEngine.TryTakeResult(freshResult)) {
         AdoptScanResult(std::move(freshResult));
 
         if (currentScanIsAutoClean && config.autoCleanMode == AutoCleanMode::AutoDelete) {
             // Disparo automático em modo "excluir sem perguntar": limpa direto,
-            // exceto "Dados orfaos", que nunca entra no auto-clean (ver
-            // Config.h / IsHeuristicCategory) mesmo que o usuário tenha
-            // habilitado a categoria manualmente.
+            // mas dos "Dados orfaos" só os de chance Baixa (IsAutoCleanEligible):
+            // ninguém confirma nada nesse fluxo.
             std::vector<ScanItem> autoItems;
             for (const auto& item : CollectSelectedItems())
-                if (!IsHeuristicCategory(item.category)) autoItems.push_back(item);
+                if (IsAutoCleanEligible(item)) autoItems.push_back(item);
             if (!autoItems.empty()) {
                 autoCleanNotifyArmed = true;
                 StartClean(autoItems, /*automatic=*/true);

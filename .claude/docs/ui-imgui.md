@@ -14,6 +14,7 @@ Abrir ao mexer em `src/ui/` (painéis, tabelas, roscas, `UiState`, `--ui-selftes
 - `itemIndices` aponta para `bucket.items`: `UiState::selection` (vetor paralelo) continua sendo a única fonte da seleção.
 - Laço do `ImGuiListClipper`: copiar a `ResultRow` antes de desenhar e sair do laço se `rowsDirty` (abrir/fechar pasta reconstrói `rows`). Ordenação vinda do cabeçalho → `GetBucketView` **antes** do laço; reconstruir no meio invalida as referências a `groups`.
 - `toggledFolders` guarda a inversão em relação ao padrão (fechado; aberto com texto no filtro) e é limpo quando o padrão muda.
+- Categoria heurística (dados órfãos) agrupa por **nível** (`GroupItemsByExistenceChance`, `ItemGroup::chance`), não por pasta: grupos na ordem fixa Baixa/Média/Alta independente da ordenação, começam abertos, nunca viram linha direta mesmo com 1 item (`inGroup` em `DrawItemRow` considera o nível), rótulo colorido por `ChanceColor` (`kSuccess`/`kWarning`/`kDanger`). `ItemGroup::folder` vira chave estável `"chance:N"`.
 
 ## Roscas (`Theme.cpp`)
 
@@ -25,4 +26,5 @@ Abrir ao mexer em `src/ui/` (painéis, tabelas, roscas, `UiState`, `--ui-selftes
 - Ações do roteiro chamam os mesmos métodos de `UiState` que o painel (`ToggleGroup`, `SetGroupSelected`, `SetResultsSort`, `RequestOpenCategory`) — tela nova → passo + asserção em `BuildScript`.
 - Mouse injetado com `io.AddMousePosEvent` entre o `NewFrame` do backend Win32 e `ImGui::NewFrame` (o backend só lê o cursor com a janela em foco, e ela fica escondida).
 - Roda do mouse injetada (`AddMouseWheelEvent`) **não** rolou a janela escondida; rolar com `ImGui::SetScrollY(ImGui::FindWindowByName("StorageCleanerMain"), y)`, só depois de 1 frame do passo (no 1º frame do app a janela ainda não existe).
+- Texto de aviso longo em cor: `PushStyleColor(ImGuiCol_Text)` + `TextWrapped` — `TextColored` não quebra linha e sai cortado (pego pelo PNG do passo `orfaos-niveis`).
 - Esperar alguns frames entre ação e captura: abrir categoria, rolar e tooltip levam 2-3 frames para assentar.

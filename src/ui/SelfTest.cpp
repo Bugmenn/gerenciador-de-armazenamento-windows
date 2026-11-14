@@ -1,5 +1,6 @@
 #include "SelfTest.h"
 
+#include "storagecleaner/OrphanClassifier.h"
 #include "storagecleaner/PathExclusion.h"
 #include "storagecleaner/Utils.h"
 
@@ -54,11 +55,19 @@ void SelfTest::LoadFixture() {
         return result.buckets.back();
     };
     auto add = [&](Category c, std::wstring path, std::uint64_t size, bool isDir = false,
-                   std::wstring keep = L"") {
+                   std::wstring keep = L"") -> ScanItem& {
         if (path.size() > 2 && path[1] == L':') expectedByDrive_[path[0]] += size;
         CategoryBucket& b = bucketFor(c);
         b.totalBytes += size;
         b.items.push_back(ScanItem{std::move(path), size, c, std::move(keep), isDir});
+        return b.items.back();
+    };
+    // Órfão classificado pela mesma regra do scanner real.
+    auto addOrphan = [&](std::wstring path, std::uint64_t size, const OrphanEvidence& evidence) {
+        OrphanVerdict verdict = ClassifyOrphan(evidence);
+        ScanItem& item = add(Category::OrphanedApps, std::move(path), size, true);
+        item.existenceChance = verdict.chance;
+        item.evidence = JoinReasons(verdict.reasons);
     };
 
     // Mesma ordem de kAllCategories, como o ScanEngine entrega.
@@ -111,7 +120,18 @@ void SelfTest::LoadFixture() {
 
     add(Category::RecycleBin, L"(Lixeira)", 2 * kGB + 100 * kMB, true);
     add(Category::RestorePoints, L"{3808876b-c176-4e48-b7ae-04046e6cc752}", 5 * kGB);
-    add(Category::OrphanedApps, L"C:\\Users\\Ana\\AppData\\Roaming\\EditorAntigo", 300 * kMB, true);
+    OrphanEvidence noSignal;
+    noSignal.daysSinceLastWrite = 1100;
+    addOrphan(L"C:\\Users\\Ana\\AppData\\Roaming\\EditorAntigo", 300 * kMB, noSignal);
+    OrphanEvidence portable;
+    portable.hasExecutables = true;
+    portable.daysSinceLastWrite = 240;
+    addOrphan(L"C:\\Users\\Ana\\AppData\\Local\\JogoPortatil", 180 * kMB, portable);
+    OrphanEvidence startup;
+    startup.startupEntry = true;
+    startup.softwareRegistryKey = true;
+    startup.daysSinceLastWrite = 200;
+    addOrphan(L"C:\\Users\\Ana\\AppData\\Roaming\\Sincronizador", 90 * kMB, startup);
     add(Category::WindowsUpdateCache, L"C:\\Windows\\SoftwareDistribution\\Download\\a1b2c3d4e5", 900 * kMB, true);
     add(Category::WindowsUpdateCache, L"C:\\Windows\\SoftwareDistribution\\Download\\f6e7d8c9b0", 410 * kMB, true);
     add(Category::CrashDumps, L"C:\\Users\\Ana\\AppData\\Local\\CrashDumps\\jogo.exe.11872.dmp", 640 * kMB);
@@ -283,8 +303,8 @@ void SelfTest::BuildScript() {
                           Check(state_.GroupSelectionState(b, 0) == TriState::None, "checkbox da pasta desmarcado");
                           Check(state_.VisibleSelectionState(b) == TriState::Some,
                                 "'Selecionar todos' da categoria fica em estado misto");
-                          Check(state_.GroupSelectionState(BucketIndex(Category::OrphanedApps), 0) == TriState::None,
-                                "categoria heurística continua sem pré-seleção");
+                          Check(state_.VisibleSelectionState(BucketIndex(Category::OrphanedApps)) == TriState::All,
+                                "órfãos de todos os níveis vêm pré-marcados");
                       }});
 
     steps_.push_back({"duplicados",
@@ -298,6 +318,37 @@ void SelfTest::BuildScript() {
                           BucketView& view = state_.GetBucketView(BucketIndex(Category::Duplicate));
                           Check(view.groups.size() == 1 && view.visibleItems == 6,
                                 "6 duplicados agrupados na mesma pasta");
+                      }});
+
+    steps_.push_back({"orfaos-niveis",
+                      [this] { state_.RequestOpenCategory(BucketIndex(Category::OrphanedApps)); },
+                      [this] {
+                          std::size_t b = BucketIndex(Category::OrphanedApps);
+                          BucketView& view = state_.GetBucketView(b);
+                          Check(view.groups.size() == 3 && view.groups[0].chance == ExistenceChance::Low &&
+                                    view.groups[1].chance == ExistenceChance::Medium &&
+                                    view.groups[2].chance == ExistenceChance::High,
+                                "órfãos agrupados na ordem Baixa, Média, Alta");
+                          Check(view.rows.size() == 6, "cada nível tem cabeçalho aberto com seu item");
+                          Check(state_.GetSelectionSummary().riskyHeuristic == 2,
+                                "resumo conta 2 órfãos de chance média/alta marcados");
+                          std::size_t eligible = 0;
+                          bool onlyLow = true;
+                          for (const auto& item : state_.lastScanResult.buckets[b].items) {
+                              if (!IsAutoCleanEligible(item)) continue;
+                              ++eligible;
+                              if (item.existenceChance != ExistenceChance::Low) onlyLow = false;
+                          }
+                          Check(eligible == 1 && onlyLow, "limpeza automática só levaria o órfão de chance Baixa");
+                      }});
+
+    steps_.push_back({"confirmacao-orfaos",
+                      [this] { state_.showCleanConfirmModal = true; },
+                      [this] {
+                          Check(state_.showCleanConfirmModal && !state_.cleaning.load(),
+                                "modal de confirmação aberto, nada sendo limpo");
+                          Check(state_.GetSelectionSummary().riskyHeuristic == 2,
+                                "modal recebe as 2 pastas de chance média/alta para o aviso");
                       }});
 }
 

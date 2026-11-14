@@ -40,6 +40,16 @@ add_executable(test_item_grouping
 target_include_directories(test_item_grouping PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME item_grouping COMMAND test_item_grouping)
 
+# Classificacao dos dados orfaos em chance Baixa/Media/Alta e quais entram
+# na limpeza automatica (OrphanClassifier.h, ScanItem.h).
+add_executable(test_orphan_classifier
+    test_orphan_classifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/OrphanClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/PathExclusion.cpp
+)
+target_include_directories(test_orphan_classifier PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME orphan_classifier COMMAND test_orphan_classifier)
+
 # Mesma leitura de fonte do app (ver /utf-8 no CMakeLists.txt raiz): os headers
 # incluidos tem literais acentuados.
 if(MSVC)
@@ -50,4 +60,5 @@ if(MSVC)
     # /EHsc: ItemGrouping.h inclui ScanResult.h (<chrono>), que exige
     # semantica de excecao (C4530 sem a flag).
     target_compile_options(test_item_grouping PRIVATE /utf-8 /EHsc)
+    target_compile_options(test_orphan_classifier PRIVATE /utf-8 /EHsc)
 endif()
